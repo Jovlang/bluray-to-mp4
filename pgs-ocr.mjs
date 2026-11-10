@@ -312,44 +312,10 @@ export function ocrSubtitles(ctx) {
   console.log('Completed OCR subtitles; video/audio payloads unchanged: '+output);
 }
 
-export function burnCommand({sourceInput,videoIndex,input,pgs,pgsStart,output,width,height,filters}) {
-  if(!sourceInput?.length || !filters?.length || !Number.isFinite(pgsStart))throw Error('Burn requires original-source input, its video filters, and the PGS timeline start');
-  // Input 0: original Blu-ray video, with FFmpeg's normal timestamp correction.
-  // Input 1: verified MP4, used ONLY for copied audio/text/metadata/chapters.
-  // Input 2: playlist-normalized PGS. Restore its absolute feature-time offset
-  // after demuxer start-time normalization; do not use global -copyts, because
-  // that disables the Blu-ray video's act-boundary discontinuity correction.
-  return ['-v','warning','-nostdin','-n',...sourceInput,'-i',input,
-    '-itsoffset',String(pgsStart),'-canvas_size',width+'x'+height,'-i',pgs,
-    '-filter_complex',`[0:${videoIndex}]${filters.join(',')}[clean];[2:s:0]scale=${width}:${height}[captions];[clean][captions]overlay=eof_action=pass:shortest=0,format=yuv420p[burned]`,
-    '-map','[burned]','-map','1:a','-map','1:s?',
-    '-map_metadata','1','-map_metadata:s:v:0','1:s:v:0','-map_chapters','1',
-    '-c:v','libx264','-crf','20','-preset','medium','-pix_fmt','yuv420p','-tag:v','avc1','-fps_mode','passthrough',
-    '-c:a','copy','-c:s','copy','-movie_timescale','1000','-movflags','+faststart',output];
-}
-
 export function burnPgs(ctx) {
-  const {opt,run,probe,ff,moveNoReplace}=ctx;
-  const {p,language,identity,normalized,expected}=preparePgs(ctx);
-  const {file:baseFile,plan:basePlan,probe:base}=verifiedBase(ctx,p,identity);
-  const output=path.resolve(opt('output',baseFile.replace(/\.mp4$/i,'')+' - '+language+' burned.mp4'));
-  if(output===path.resolve(baseFile)||fs.existsSync(output))throw Error('Choose a new burn output path; existing MP4s are preserved');
-  const video=base.streams.find(s=>s.codec_type==='video');
-  const partial=output+'.partial.mp4';if(fs.existsSync(partial))throw Error('Partial burned output exists; preserved');
-  const pgsStart=Number(probe(['-i',normalized]).format.start_time);
-  const command=burnCommand({sourceInput:ctx.input(p),videoIndex:p.video.index,input:baseFile,pgs:normalized,pgsStart,output:partial,width:video.width,height:video.height,filters:p.filters});
-  console.log(JSON.stringify({mode:'hardcoded PGS',language,captions:expected.length,video:'Original Blu-ray -> planned deinterlace/scale + PGS overlay -> one libx264 CRF 20 medium encode',audio:'stream copy from verified MP4; payload hashes checked',switchable:false,command:[ff,...command]},null,2));
-  if(ctx.args.includes('--prepare-only'))return;
-  const audioHashes=mediaHashes(ctx,baseFile,['a']);
-  fs.mkdirSync(path.dirname(output),{recursive:true});
-  run(ff,command,true);
-  ctx.restoreSubtitleDefaults(partial,basePlan);
-  if(JSON.stringify(audioHashes)!==JSON.stringify(mediaHashes(ctx,partial,['a'])))throw Error('Burn changed audio payloads; partial preserved');
-  const verified=ctx.validate(partial,basePlan);
-  const chapterView=q=>q.chapters.map(c=>[c.start_time,c.end_time,c.tags?.title]);
-  if(JSON.stringify(chapterView(base))!==JSON.stringify(chapterView(verified)))throw Error('Burn changed chapters');
-  const receipt=partial+'.verified.json';
-  fs.writeFileSync(receipt,JSON.stringify({version:1,operation:'pgs-burn',parentPlanHash:identity.planHash,sourceMp4:baseFile,language,sourceCueCount:expected.length,pgsHash:digest(fs.readFileSync(normalized)),audioPayloadHashes:audioHashes,verifiedAt:new Date().toISOString(),probe:verified},null,2),{flag:'wx'});
-  moveNoReplace(partial,output);moveNoReplace(receipt,output+'.verified.json');
-  console.log('Completed hardcoded PGS; audio payloads unchanged: '+output);
+  if(ctx.args.includes('--base-mp4')||ctx.args.includes('--base-receipt'))throw Error('burn-pgs renders directly from the reviewed Blu-ray plan; base MP4 options apply only to ocr-subtitles');
+  const {p,planFile,language,normalized,expected}=preparePgs(ctx);
+  const output=path.resolve(ctx.opt('output',p.output.replace(/\.mp4$/i,'')+' - '+language+' burned.mp4'));
+  const start=Number(ctx.probe(['-i',normalized]).format.start_time);
+  ctx.encodeReviewed({p,planFile,output,burn:{file:normalized,start,language,hash:digest(fs.readFileSync(normalized)),cues:expected.length},prepareOnly:ctx.args.includes('--prepare-only'),finalize:ctx.args.includes('--finalize')});
 }

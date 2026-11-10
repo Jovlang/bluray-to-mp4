@@ -166,8 +166,70 @@ function verifyTracks(q,p) {
 }
 
 function validate(file,p,decode=true){const q=probe(['-i',file]),v=q.streams.filter(s=>s.codec_type==='video'),a=q.streams.filter(s=>s.codec_type==='audio');if(v.length!==1||v[0].codec_name!=='h264'||v[0].pix_fmt!=='yuv420p'||v[0].height>1080||v[0].width>1920||!a.length||a.some(s=>s.codec_name!=='aac'||s.profile!=='LC'))throw Error('Output codec/layout validation failed');if(Math.abs(Number(q.format.duration)-p.feature.duration)>Math.max(3,p.feature.duration*.001))throw Error('Output duration mismatch');const rate=s=>{const [n,d]=s.split('/').map(Number);return n/d;};if(Math.abs(rate(v[0].avg_frame_rate)-rate(p.video.avg_frame_rate))>.02)throw Error('Frame rate mismatch');if(p.version===2)verifyTracks(q,p);if(decode && p.version===2 && p.subtitles.length)run(ff,['-v','error','-xerror','-i',file,'-map','0:s','-c:s','srt','-f','null','-'],true);if(decode)run(ff,['-v','error','-xerror','-i',file,'-map','0:v:0','-map','0:a','-fps_mode','passthrough','-enc_time_base:v','demux','-f','null','-'],true);return q;}
+function chapterMetadata(p) {
+ const escape=s=>s.replace(/[\\=;#\n]/g,c=>'\\'+c);
+ let text=';FFMETADATA1\ntitle='+escape(p.title)+'\n';
+ p.feature.chapters.forEach((t,i,arr)=>text+=`[CHAPTER]\nTIMEBASE=1/1000\nSTART=${Math.round(t*1000)}\nEND=${Math.round((arr[i+1]??p.feature.duration)*1000)}\ntitle=Chapter ${i+1}\n`);
+ return text;
+}
+
+// Both encode paths share input 0 (original Blu-ray), input 1 (chapters/title),
+// video settings and the exact same source-audio/text-track mapping pipeline.
+function buildEncodeCommand(p,{metadata,output,burn,sourceInput=input(p)}) {
+ const a=['-hide_banner','-nostdin','-n',...sourceInput,'-f','ffmetadata','-i',metadata];
+ if(burn) {
+  if(!Number.isFinite(burn.start))throw Error('PGS timeline start is missing');
+  a.push('-itsoffset',String(burn.start),'-canvas_size',p.video.width+'x'+p.video.height,'-i',burn.file,
+   '-filter_complex',`[0:${p.video.index}]${p.filters.join(',')}[clean];[2:s:0][clean]scale2ref[caption][picture];[picture][caption]overlay=eof_action=pass:shortest=0,format=yuv420p[burned]`,
+   '-map','[burned]');
+ }else a.push('-map','0:'+p.video.index,'-vf',p.filters.join(','));
+ a.push('-map_metadata','0','-map_metadata:g','1','-map_chapters','1','-metadata','title='+p.title,
+  '-c:v','libx264','-crf','20','-preset','medium','-pix_fmt','yuv420p','-tag:v','avc1','-fps_mode','passthrough',
+  ...trackOptions(p),'-movie_timescale','1000','-movflags','+faststart','-max_muxing_queue_size','4096',output);
+ return a;
+}
+
+function encodeReviewed({p,planFile,output,burn,prepareOnly=false,finalize=false,sourceInput}) {
+ if(p.version!==2)throw Error('This converter requires a new version-2 inspection plan');
+ if(p.warnings.length)throw Error(p.warnings.join('\n'));
+ if(fingerprint(p.source,p.feature)!==p.fingerprint)throw Error('Source changed; inspect again');
+ output=path.resolve(output);
+ const planHash=hash(fs.readFileSync(planFile));
+ const operation=burn?'pgs-burn':'encode';
+ const renderKey=hash(JSON.stringify({operation,pgsHash:burn?.hash,language:burn?.language}));
+ const matches=r=>r.planHash===planHash && (r.renderKey===renderKey || (!burn&&!r.renderKey&&!r.operation));
+ if(fs.existsSync(output)) {
+  validate(output,p);
+  const receipt=output+'.verified.json';
+  if(!fs.existsSync(receipt)||!matches(JSON.parse(fs.readFileSync(receipt))))throw Error('Existing output has no matching render receipt; preserved. Choose another output path.');
+  console.log('Verified matching existing output; skipping.');return;
+ }
+ const partial=output+'.partial.mp4',metadata=output+'.chapters.ffmeta';
+ const command=buildEncodeCommand(p,{metadata,output:partial,burn,sourceInput});
+ console.log(JSON.stringify({operation,playlist:p.feature.playlist,duration:p.feature.duration,language:burn?.language,pgsCaptions:burn?.cues,video:'Original Blu-ray -> planned video filters'+(burn?' + normalized PGS overlay':'')+' -> libx264 CRF 20 medium',audio:'All retained source audio -> AAC-LC via the shared track pipeline',command:[ff,...command]},null,2));
+ if(prepareOnly)return;
+ fs.mkdirSync(path.dirname(output),{recursive:true});
+ const verifyAndPromote=()=>{
+  restoreSubtitleDefaults(partial,p);
+  const verified=validate(partial,p);
+  const expectedChapters=p.feature.chapters.map((t,i,all)=>[Math.round(t*1000),Math.round((all[i+1]??p.feature.duration)*1000),'Chapter '+(i+1)]);
+  const actualChapters=verified.chapters.map(c=>[Math.round(Number(c.start_time)*1000),Math.round(Number(c.end_time)*1000),c.tags?.title]);
+  if(JSON.stringify(expectedChapters)!==JSON.stringify(actualChapters))throw Error('Output chapters differ from the reviewed plan');
+  const receipt=partial+'.verified.json';
+  if(fs.existsSync(receipt)) {
+   if(!matches(JSON.parse(fs.readFileSync(receipt))))throw Error('Partial receipt belongs to another render; preserved');
+  }else fs.writeFileSync(receipt,JSON.stringify({planHash,renderKey,operation,source:p.source,language:burn?.language,pgsHash:burn?.hash,sourceCueCount:burn?.cues,verifiedAt:new Date().toISOString(),probe:verified},null,2),{flag:'wx'});
+  moveNoReplace(partial,output);moveNoReplace(receipt,output+'.verified.json');
+  console.log('Completed and fully decoded: '+output);
+ };
+ if(finalize){if(!fs.existsSync(partial))throw Error('No partial MP4 to finalize');verifyAndPromote();return;}
+ if(fs.existsSync(partial))throw Error('Partial output exists; preserve/rename it before retrying');
+ fs.writeFileSync(metadata,chapterMetadata(p),{flag:'wx'});
+ try{run(ff,command,true);verifyAndPromote();}finally{fs.unlinkSync(metadata);}
+}
+
 function main(){
- if(mode==='burn-pgs'){burnPgs({args,opt,run,probe,ff,fp,hash,moveNoReplace,mpls,input,fingerprint,validate,restoreSubtitleDefaults});return;}
+ if(mode==='burn-pgs'){burnPgs({args,opt,run,probe,ff,fp,hash,moveNoReplace,mpls,input,fingerprint,validate,restoreSubtitleDefaults,encodeReviewed});return;}
  if(mode==='ocr-subtitles'){ocrSubtitles({args,opt,run,probe,ff,fp,hash,moveNoReplace,mpls,input,fingerprint,validate,restoreSubtitleDefaults});return;}
 
  if(mode==='inspect'){
@@ -175,13 +237,13 @@ function main(){
   if(!opt('source'))throw Error('--source is required');const dir=path.join(source,'BDMV','PLAYLIST');let candidates=fs.readdirSync(dir).filter(f=>/\.mpls$/i.test(f)).map(f=>mpls(path.join(dir,f))).filter(p=>p.duration>60).sort((a,b)=>b.duration-a.duration);const unique=[...new Map(candidates.map(p=>[p.signature,p])).values()].sort((a,b)=>b.duration-a.duration);if(!unique.length)throw Error('No feature playlists');const selected=opt('playlist');const feature=selected?candidates.find(p=>Number(p.playlist)===Number(selected)):unique[0];if(!feature)throw Error('Playlist not found');const p={version:2,source,title:opt('title',path.basename(source)),output:path.resolve(opt('output',path.join(source,path.basename(source)+'.mp4'))),feature,candidates:unique.map(({playlist,duration,items})=>({playlist,duration,clips:items.map(i=>i.clip)})),warnings:[]};p.fingerprint=fingerprint(source,feature);const q=probe(input(p));playlistLanguages(p,q);p.sourceProbe=q;p.video=q.streams.filter(s=>s.codec_type==='video'&&!s.disposition?.attached_pic).sort((a,b)=>b.width*b.height-a.width*a.height)[0];if(!p.video)throw Error('No video');const audioCandidates=q.streams.filter(t=>t.codec_type==='audio'&&audioScore(t)>=0);selectTracks(p,q,opt('audio'),audioHashes(p,audioCandidates));p.interlace=detect(p,p.video);const force=opt('interlace');if(force){if(!['progressive','interlaced'].includes(force))throw Error('Invalid --interlace');p.interlace.state=force;p.interlace.manual=true;}if(new Set(feature.items.map(i=>JSON.stringify(i))).size<feature.items.length)p.warnings.push('Selected playlist repeats clip ranges; review for loops/extras before encoding.');if(!selected&&unique[1]?.duration>feature.duration*.9)p.warnings.push('Competing feature playlists: inspect candidates and rerun with --playlist NUMBER.');if(p.interlace.state==='uncertain')p.warnings.push('Interlace uncertain: review samples/source and rerun with --interlace progressive|interlaced.');if(/smpte2084|arib-std-b67/.test(p.video.color_transfer||'')||p.video.color_space==='bt2020nc')p.warnings.push('HDR/wide gamut source requires a separately reviewed tone mapping workflow.');p.filters=[...(p.interlace.state==='interlaced'?['bwdif=mode=send_frame:parity=auto:deint=all']:[]),"scale=w='min(iw,1920)':h='min(ih,1080)':force_original_aspect_ratio=decrease:force_divisible_by=2",'format=yuv420p'];p.expected={video:'libx264 CRF 20 medium yuv420p; original frame rate; maximum 1920x1080',audio:p.retainedAudio.map(t=>({sourceIndex:t.index,language:languageOf(t),title:titleOf(t),codec:'AAC-LC',channels:Math.min(t.channels,6),bitrate:t.channels>2?'512k':'256k',default:t.index===p.audio.index})),subtitles:p.subtitles.map(s=>s.index),chapters:feature.chapters.length,filters:p.filters};const plan=path.resolve(opt('plan','apple-mp4-plan.json'));fs.writeFileSync(plan,JSON.stringify(p,null,2),{flag:'wx'});console.log(JSON.stringify({plan,title:p.title,feature:p.feature,candidates:p.candidates,video:p.video,audioTracks:p.audioDecisions,subtitleTracks:p.subtitleDecisions,selectedDefaultAudio:p.audio,interlace:p.interlace,expected:p.expected,warnings:p.warnings},null,2));return;
  }
  if(mode==='encode'||mode==='finalize'){
-  const planFile=path.resolve(opt('plan','apple-mp4-plan.json')),p=JSON.parse(fs.readFileSync(planFile));if(p.version!==2)throw Error('This converter requires a new version-2 inspection plan; old outputs remain untouched.');if(p.warnings.length)throw Error(p.warnings.join('\n'));if(fingerprint(p.source,p.feature)!==p.fingerprint)throw Error('Source changed; inspect again');if(fs.existsSync(p.output)){validate(p.output,p);const receipt=p.output+'.verified.json';if(!fs.existsSync(receipt)||JSON.parse(fs.readFileSync(receipt)).planHash!==hash(fs.readFileSync(planFile)))throw Error('Existing playable output has no matching receipt; preserved. Choose another output path.');console.log('Verified matching existing output; skipping.');return;}
-  fs.mkdirSync(path.dirname(p.output),{recursive:true});const temp=p.output+'.partial.mp4',meta=p.output+'.chapters.ffmeta';if(mode==='finalize'){if(!fs.existsSync(temp))throw Error('No partial MP4 to finalize');const receipt=temp+'.verified.json';if(fs.existsSync(receipt)&&JSON.parse(fs.readFileSync(receipt)).planHash!==hash(fs.readFileSync(planFile)))throw Error('Partial receipt belongs to another plan; preserved');const verified=validate(temp,p);if(!fs.existsSync(receipt))fs.writeFileSync(receipt,JSON.stringify({planHash:hash(fs.readFileSync(planFile)),verifiedAt:new Date().toISOString(),probe:verified},null,2),{flag:'wx'});moveNoReplace(temp,p.output);moveNoReplace(receipt,p.output+'.verified.json');console.log('Finalized and fully decoded: '+p.output);return;}if(fs.existsSync(temp))throw Error('Partial output exists; preserve/rename it before retrying (encoding restarts, not mid-file resume).');const esc=s=>s.replace(/[\\=;#\n]/g,c=>'\\'+c);let text=';FFMETADATA1\ntitle='+esc(p.title)+'\n';p.feature.chapters.forEach((t,i,arr)=>text+=`[CHAPTER]\nTIMEBASE=1/1000\nSTART=${Math.round(t*1000)}\nEND=${Math.round((arr[i+1]??p.feature.duration)*1000)}\ntitle=Chapter ${i+1}\n`);fs.writeFileSync(meta,text,{flag:'wx'});
-  try{const a=['-hide_banner','-nostdin','-n',...input(p),'-f','ffmetadata','-i',meta,'-map',`0:${p.video.index}`];a.push('-map_metadata','0','-map_metadata:g','1','-map_chapters','1','-metadata','title='+p.title,'-vf',p.filters.join(','),'-c:v','libx264','-crf','20','-preset','medium','-pix_fmt','yuv420p','-tag:v','avc1','-fps_mode','passthrough');a.push(...trackOptions(p));a.push('-movflags','+faststart','-max_muxing_queue_size','4096',temp);console.log(JSON.stringify({command:[ff,...a]},null,2));run(ff,a,true);restoreSubtitleDefaults(temp,p);const verified=validate(temp,p);fs.writeFileSync(temp+'.verified.json',JSON.stringify({planHash:hash(fs.readFileSync(planFile)),verifiedAt:new Date().toISOString(),probe:verified},null,2),{flag:'wx'});moveNoReplace(temp,p.output);moveNoReplace(temp+'.verified.json',p.output+'.verified.json');console.log('Completed and fully decoded: '+p.output);}finally{fs.unlinkSync(meta);}return;
+  const planFile=path.resolve(opt('plan','apple-mp4-plan.json'));
+  const p=JSON.parse(fs.readFileSync(planFile));
+  encodeReviewed({p,planFile,output:p.output,finalize:mode==='finalize'});return;
  }
  console.log('Inspect: node apple-mp4.mjs inspect --source "D:\\Opera" --output "D:\\Converted\\Opera.mp4" --plan "Opera.plan.json"\nEncode after review: node apple-mp4.mjs encode --plan "Opera.plan.json"\nRecover a completed partial (reverifies fully): node apple-mp4.mjs finalize --plan \"Opera.plan.json\"\nOpt-in PGS OCR/remux: node apple-mp4.mjs ocr-subtitles --plan Opera.plan.json --language eng --seconv PATH --tesseract-dir DIR --prepare-only\nAfter text review: repeat with --reviewed-srt reviewed.srt --output Opera-English.mp4\nHardcoded PGS option: node apple-mp4.mjs burn-pgs --plan Opera.plan.json --language eng --output Opera-burned.mp4 --prepare-only\nInspection options: --playlist NUMBER --audio STREAM_INDEX --interlace progressive|interlaced --title TITLE\nTool overrides: --ffmpeg PATH --ffprobe PATH');
 }
-export {moveNoReplace, mpls, playlistLanguages, audioScore, selectTracks, trackOptions, verifyTracks, validate, probe, run, restoreSubtitleDefaults};
+export {encodeReviewed,buildEncodeCommand,chapterMetadata,fingerprint,moveNoReplace, mpls, playlistLanguages, audioScore, selectTracks, trackOptions, verifyTracks, validate, probe, run, restoreSubtitleDefaults};
 if(process.argv[1] && import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
  try{main();}catch(e){console.error(e.message);process.exitCode=1;}
 }

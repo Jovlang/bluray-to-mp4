@@ -1,6 +1,6 @@
 {
   "name": "bluray-to-mp4",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "Inspect Blu-ray playlists and convert main features to Apple-friendly H.264/AAC MP4s using FFmpeg",
