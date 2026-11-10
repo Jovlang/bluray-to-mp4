@@ -1,0 +1,12 @@
+# Local media and inspection/verification artifacts
+node_modules/
+work/
+*.mp4
+*.m2ts
+*.mkv
+*.mpls
+*.srt
+*.plan.json
+*.verified.json
+*.ffmeta
+*.log
