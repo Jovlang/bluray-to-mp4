@@ -317,5 +317,5 @@ export function burnPgs(ctx) {
   const {p,planFile,language,normalized,expected}=preparePgs(ctx);
   const output=path.resolve(ctx.opt('output',p.output.replace(/\.mp4$/i,'')+' - '+language+' burned.mp4'));
   const start=Number(ctx.probe(['-i',normalized]).format.start_time);
-  ctx.encodeReviewed({p,planFile,output,burn:{file:normalized,start,language,hash:digest(fs.readFileSync(normalized)),cues:expected.length},prepareOnly:ctx.args.includes('--prepare-only'),finalize:ctx.args.includes('--finalize')});
+  ctx.encodeReviewed({p,planFile,output,burn:{file:normalized,start,language,hash:digest(fs.readFileSync(normalized)),cues:expected.length},prepareOnly:ctx.args.includes('--prepare-only'),finalize:ctx.args.includes('--finalize'),resilient:ctx.args.includes('--resilient')});
 }

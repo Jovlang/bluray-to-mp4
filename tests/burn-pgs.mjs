@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
+import {spawn,spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {burnPgs} from '../pgs-ocr.mjs';
 import crypto from 'node:crypto';
@@ -52,6 +52,13 @@ try {
   assert.deepEqual(settings(command).slice(0,-1),settings(ordinary).slice(0,-1),'burn must share all audio/text/metadata/output settings with normal encode');
   const q=probe(['-i','burned.mp4']);assert.equal(q.streams[0].codec_name,'h264');assert.equal(q.streams[0].avg_frame_rate,'25/1');assert.equal(q.streams[0].pix_fmt,'yuv420p');assert.equal(q.streams[0].field_order,'progressive');assert.equal(q.format.tags.title,'Source title');assert.equal(q.streams.filter(s=>s.codec_type==='subtitle').length,1);assert(q.streams.filter(s=>s.codec_type==='audio').every(s=>s.codec_name==='aac'&&s.profile==='LC'));assert.equal(q.chapters.length,2);
   const receipt=JSON.parse(fs.readFileSync('burned.mp4.verified.json'));assert.equal(receipt.operation,'pgs-burn');assert.equal(receipt.source,source);assert.equal(receipt.pgsHash,rendered.burn.hash);
+  encodeReviewed({...rendered,sourceInput,output:path.resolve('resilient.mp4'),resilient:true});
+  assert(fs.existsSync('resilient.mp4.checkpoint.mp4'));assert.equal(probe(['-i','resilient.mp4']).chapters.length,2);
+  const atoms=fs.readFileSync('resilient.mp4');assert(!atoms.includes(Buffer.from('moof')),'final delivery must not be fragmented');assert(atoms.indexOf(Buffer.from('moov'))<atoms.indexOf(Buffer.from('mdat')),'final delivery must use faststart');
+  const interrupted=spawn('ffmpeg',['-v','error','-n','-re','-f','lavfi','-i','color=blue:size=320x180:rate=25:duration=30','-c:v','libx264','-preset','medium','-crf','20','-tune','zerolatency','-g','25','-movflags','+hybrid_fragmented+frag_keyframe','-flush_packets','1','interrupted.mp4'],{stdio:'ignore'});
+  let ready=false;for(let i=0;i<50;i++){await new Promise(resolve=>setTimeout(resolve,200));if(fs.existsSync('interrupted.mp4')){const r=spawnSync('ffprobe',['-v','error','-show_entries','format=duration','-of','json','interrupted.mp4'],{encoding:'utf8'});if(r.status===0&&Number(JSON.parse(r.stdout).format.duration)>=.9){ready=true;break;}}}
+  interrupted.kill('SIGKILL');await new Promise(resolve=>interrupted.once('close',resolve));assert(ready,'checkpoint did not flush a readable fragment');
+  assert(Number(probe(['-i','interrupted.mp4']).format.duration)>=.9,'completed checkpoint fragments must survive abrupt termination');
   const before=sha(fs.readFileSync('burned.mp4'));assert.throws(()=>encodeReviewed({...rendered,sourceInput,burn:{...rendered.burn,hash:'different'}}),/matching render/);assert.equal(sha(fs.readFileSync('burned.mp4')),before);
   function pixel(time) {
     const r=spawnSync('ffmpeg',['-v','error','-ss',String(time),'-i','burned.mp4','-frames:v','1','-pix_fmt','gray','-f','rawvideo','-'],{encoding:null,maxBuffer:1024*1024});

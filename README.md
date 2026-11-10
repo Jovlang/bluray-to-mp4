@@ -105,3 +105,7 @@ The regression test runs the production burn operation with **no base MP4 or rec
 ### Relocated verified MP4s
 
 Only `ocr-subtitles` accepts `--base-mp4 "D:\Archive\Opera.mp4" --base-receipt "D:\Plans\Opera.mp4.verified.json"` when the verified MP4 was moved. The receipt must belong to the same inspection plan and match the file size; codec, track and metadata checks still apply. A verified OCR-enhanced MP4 can also be the base for another OCR-remux operation, preserving its existing tracks. Adding a duplicate text language is rejected. `burn-pgs` rejects base-MP4 options because its video, audio, metadata and text tracks come directly from the reviewed Blu-ray source.
+
+### Interruption-tolerant encoding
+
+With a recent FFmpeg supporting `hybrid_fragmented`, add `--resilient` to `encode` or `burn-pgs`. Encoding writes a checkpoint MP4 whose completed keyframe fragments remain readable after an abrupt interruption. At successful completion the converter stream-copies it to the ordinary faststart MP4, compares every encoded video/audio payload hash, then runs the usual full verification and safe promotion. No additional video/audio encoding is performed. The checkpoint is a recovery artifact, not the deliverable; it is retained beside the output for inspection. Incomplete checkpoints do not satisfy the full-duration checks, and this option does not implement automatic mid-file resume. Existing checkpoints are never overwritten.
