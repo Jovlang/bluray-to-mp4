@@ -50,6 +50,12 @@ const before=fs.readFileSync('work/multi-no-default-sub.mp4');restoreSubtitleDef
  const side={retainedAudio:[track],audio:track,subtitles:[]};
  run('ffmpeg',['-v','error','-y','-f','lavfi','-i','anullsrc=channel_layout=5.1(side):sample_rate=48000:duration=1',...trackOptions(side),'-movflags','+faststart','work/side.mp4']);
  const q=probe(['-i','work/side.mp4']);verifyTracks(q,side);assert.equal(q.streams[0].channel_layout,'5.1');
+ {
+ const track={index:0,channels:5,channel_layout:'5.0(side)',tags:{language:'eng',title:'Side surround'}};
+ const side={retainedAudio:[track],audio:track,subtitles:[]};
+ run('ffmpeg',['-v','error','-y','-f','lavfi','-i','anullsrc=channel_layout=5.0(side):sample_rate=48000:duration=1',...trackOptions(side),'-movflags','+faststart','work/side5.mp4']);
+ const q=probe(['-i','work/side5.mp4']);verifyTracks(q,side);assert.equal(q.streams[0].channel_layout,'5.0');
+ }
  const disc='work/disc';fs.mkdirSync(disc+'/BDMV/PLAYLIST',{recursive:true});
  const b=Buffer.alloc(140);b.writeUInt32BE(40,8);b[89]=1;b[100]=9;b[101]=1;b.writeUInt16BE(0x1100,102);b[110]=5;b[111]=0x80;b.write('eng',113);fs.writeFileSync(disc+'/BDMV/PLAYLIST/00000.mpls',b);
  const languageProbe={streams:[{id:'0x1100',codec_type:'audio'}]};playlistLanguages({source:disc,feature:{playlist:'00000'}},languageProbe);assert.equal(languageProbe.streams[0].tags.language,'eng');

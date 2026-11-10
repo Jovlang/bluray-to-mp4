@@ -45,7 +45,7 @@ function playlistLanguages(p,q) {
   at=attr+len;
  }
 }
-const targetLayout=t=>t.channels>6||t.channel_layout==='5.1(side)'?'5.1':t.channel_layout;
+const targetLayout=t=>t.channels>6?'5.1':({'5.1(side)':'5.1','5.0(side)':'5.0'}[t.channel_layout]||t.channel_layout);
 function dispositions(s, isDefault) {
  const flags = Object.entries(s.disposition || {}).filter(([k,v]) => v && k !== 'default').map(([k]) => k);
  if (isDefault ?? !!s.disposition?.default) flags.unshift('default');
@@ -98,7 +98,7 @@ function trackOptions(p) {
  p.retainedAudio.forEach((t,i)=>{
   metadata(t,'a',i);a.push('-c:a:'+i,'aac','-profile:a:'+i,'aac_low','-b:a:'+i,t.channels>2?'512k':'256k');
   if(t.channels>6)a.push('-ac:a:'+i,'6','-channel_layout:a:'+i,'5.1');
-  else if(t.channel_layout==='5.1(side)')a.push('-filter:a:'+i,'pan=5.1|FL=FL|FR=FR|FC=FC|LFE=LFE|BL=SL|BR=SR','-channel_layout:a:'+i,'5.1');
+  else if(['5.1(side)','5.0(side)'].includes(t.channel_layout))a.push('-filter:a:'+i,'pan='+targetLayout(t)+'|FL=FL|FR=FR|FC=FC'+(t.channels===6?'|LFE=LFE':'')+'|BL=SL|BR=SR','-channel_layout:a:'+i,targetLayout(t));
   else if(t.channel_layout && t.channel_layout!=='unknown')a.push('-channel_layout:a:'+i,t.channel_layout);
  });
  p.subtitles.forEach((t,i)=>{metadata(t,'s',i);a.push('-c:s:'+i,'mov_text');});
