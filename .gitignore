@@ -10,3 +10,8 @@ work/
 *.verified.json
 *.ffmeta
 *.log
+*.sup
+*.pgs
+*-plan.json
+ocr-*/
+*.partial*

@@ -2,6 +2,8 @@
 
 `apple-mp4.mjs` needs Node.js 20+ and ffmpeg/ffprobe on PATH, built with libbluray, libx264, AAC, idet and bwdif. No HandBrake or npm packages are used.
 
+Keep `apple-mp4.mjs` and its companion `pgs-ocr.mjs` together in the same directory.
+
 ## Inspect first
 
 Run in PowerShell from the directory containing the script:
@@ -57,3 +59,47 @@ Track mapping reference: [FFmpeg metadata and dispositions](https://ffmpeg.org/f
 ## Development checks
 
 Run `npm test` (no npm installation step or packages required). Tests generate small synthetic media in an isolated temporary directory, exercise real ffmpeg/ffprobe conversions, and clean up that directory. They check MPLS trim/chapter parsing, track retention/exclusion, exact-payload deduplication, AAC channel limits, metadata/default/forced preservation, H.264 frame rate, full decoding, and rejection of invalid results. They do not replace inspection and verification of each real Blu-ray.
+
+## Opt-in PGS OCR and lossless remux
+
+PGS remains excluded from ordinary conversion. The explicit `ocr-subtitles` command can add a selected PGS language to an already verified MP4, with **no video or audio re-encoding**. It needs the original Blu-ray, its inspection plan, the converted MP4 and matching receipt, plus local [Subtitle Edit SeConv](https://github.com/SubtitleEdit/subtitleedit/releases) and [Tesseract](https://github.com/SubtitleEdit/subtitleedit/blob/main/docs/third-party-components.md). Install them normally or unpack portable copies; this script never downloads or installs OCR engines. For portable Tesseract, put its English model at `Tesseract/tessdata/eng.traineddata`; the official [tessdata_best model](https://github.com/tesseract-ocr/tessdata_best) favors accuracy. OCR stays local.
+
+Prepare text and a review report:
+
+```powershell
+node .\apple-mp4.mjs ocr-subtitles --plan "Opera.plan.json" --language eng --seconv "D:\Tools\SeConv\seconv.exe" --tesseract-dir "D:\Tools\Tesseract" --workdir "D:\OCR\Opera" --prepare-only
+```
+
+The command selects a unique matching PGS track. If the language has multiple tracks, pass `--subtitle-index INDEX` using the stream index from inspection. Each play item's primary-angle MPLS language/PID attributes are checked, so a changed PID is not mistaken for another language. PGS is extracted from the original clips with original timestamps, rebased to the playlist's IN/OUT points, and joined on the feature timeline. The 32-bit SUP timestamp wrap is handled; captions crossing trims are clipped. Fully transparent objects are excluded from the visible cue count. No timing is inferred from OCR text or dialogue recognition.
+
+`candidate.srt` and `review.json` appear in the work directory. The report records conservative automatic corrections (standalone `|` to `I`) and flags likely glyph, capitalization, and mixed-letter/digit mistakes. **These heuristics are not a substitute for proofreading.** Compare suspicious text with the original PGS images in Subtitle Edit, then save a **separate** reviewed SRT. Keep every cue and its timing; the command rejects missing, shifted, overlapping or empty cues. Styling may be simplified to MP4 text capabilities.
+
+Mux the reviewed text:
+
+```powershell
+node .\apple-mp4.mjs ocr-subtitles --plan "Opera.plan.json" --language eng --seconv "D:\Tools\SeConv\seconv.exe" --tesseract-dir "D:\Tools\Tesseract" --workdir "D:\OCR\Opera" --reviewed-srt "D:\OCR\Opera\reviewed.srt" --output "D:\Converted\Opera - English.mp4"
+```
+
+Without `--prepare-only`, the command stops if text is flagged and no reviewed SRT was supplied; otherwise it can complete in one pass. A reviewed SRT means the caller has checked its text. Timings and counts are always checked against the PGS display events, with at most 3 ms of rounding tolerance.
+
+The existing MP4 is preserved. The new file contains all existing video, audio, and text subtitles, plus a selectable, non-forced, non-default `mov_text` track labeled English (`eng`). Other languages use their ISO 639-2 label. Audio default flags, metadata and chapters are retained. Before promotion, the command compares SHA-256 hashes of **every copied video/audio payload**, fully decodes the new MP4, checks all codecs and metadata, compares chapters, and extracts the new subtitle back to SRT to verify every text and timing value. It creates a matching verification receipt and a standalone SRT next to the result.
+
+Output paths must be new; using the original MP4 path is rejected. Partial files and conflicting existing outputs are preserved for inspection. A fingerprint-bound, SHA-256-checked work cache supports reruns without repeating extraction/OCR. Do not edit cache files; save text edits as a separate reviewed SRT. If a failed run leaves an unverified cache or partial remux, inspect/rename it or use a fresh work/output path. A different source, plan, language or track needs a different work directory.
+
+## Optional hardcoded PGS encode
+
+`burn-pgs` renders the original PGS bitmap lettering into a new H.264 file. It uses the same playlist-based timing preparation and language selection, but **does not OCR** and needs neither SeConv nor Tesseract. The captions become part of the picture and cannot be switched off. This is an alternative video render from the original Blu-ray: **original video → the inspected deinterlace/scale pipeline + PGS overlay → one libx264 CRF 20 / medium / yuv420p encode**. The already encoded MP4 video is never used as a video source. AAC audio, chapters, metadata and any existing text subtitle tracks are copied from the already verified MP4. There is neither H.264 → H.264 generation loss nor AAC → AAC re-encoding.
+
+Inspect the exact command first:
+
+```powershell
+node .\apple-mp4.mjs burn-pgs --plan "Opera.plan.json" --language eng --workdir "D:\OCR\Opera" --output "D:\Converted\Opera - English burned.mp4" --prepare-only
+```
+
+Remove `--prepare-only` to run the encode. Use `--subtitle-index INDEX` if the language is ambiguous. No burn-in happens during ordinary `encode` or `ocr-subtitles`. As with OCR remuxing, a new output path is required, the source fingerprint and base receipt are checked, chapters/defaults are preserved, all output tracks are verified, and the complete result is decoded before promotion. Audio SHA-256 payload hashes must match the base MP4. The burned render is one lossy video encode from the original Blu-ray, with no intermediate H.264 generation. Selectable OCR subtitles instead keep the existing encoded video bit-for-bit.
+
+The tests deliberately give the original interlaced video and the verified MP4 different pictures. They prove that the burn uses the original picture, applies the planned deinterlacing/scaling, preserves its frame rate despite a nonzero timestamp origin, shows a synthetic PGS rectangle only during the source display interval, copies the verified MP4 metadata, and leaves every AAC payload unchanged. A long-chapter remux test guards against MP4 chapter timescale overflow when adding text subtitles.
+
+### Relocated verified MP4s
+
+Both PGS commands accept `--base-mp4 "D:\Archive\Opera.mp4" --base-receipt "D:\Plans\Opera.mp4.verified.json"` when the verified MP4 was moved. The receipt must belong to the same inspection plan and match the file size; codec, track and metadata checks still apply. A verified OCR-enhanced MP4 can supply AAC/chapters/metadata too, including its existing selectable text tracks. Adding a duplicate text language is rejected. The original Blu-ray path and fingerprint in the inspection plan still control the burn video source.
