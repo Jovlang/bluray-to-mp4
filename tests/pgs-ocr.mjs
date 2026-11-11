@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import {normalizeSup,supTimes,parseSrt,writeSrt,checkTiming,reviewOcr,supGroups,verifiedBase} from '../pgs-ocr.mjs';
+import {normalizeSup,supTimes,parseSrt,writeSrt,checkTiming,reviewOcr,supGroups,verifiedBase,validateReviewedSrt} from '../pgs-ocr.mjs';
 
 function segment(type,time,payload=Buffer.alloc(0)) {
   const b=Buffer.alloc(13+payload.length);b.write('PG');b.writeUInt32BE(Math.round(time*90000)>>>0,2);b[10]=type;b.writeUInt16BE(payload.length,11);payload.copy(b,13);return b;
@@ -33,6 +33,13 @@ checkTiming(reviewed.cues,[{start:1,end:3}],5);
 assert.throws(()=>checkTiming([{start:1.1,end:3,text:'wrong timing'}],[{start:1,end:3}],5),/changed source timing/);
 assert.throws(()=>checkTiming([], [{start:1,end:3}],5),/count/);
 assert.throws(()=>parseSrt('1\n00:00:01,000 --> 00:00:02,000\n'),/empty/);
+const original=[{start:1,end:3,text:'First'},{start:3,end:5,text:'Second'}],candidate=writeSrt(original);
+assert.equal(validateReviewedSrt(candidate,candidate.replace('First','Corrected first'),original,6)[0].text,'Corrected first');
+for(const altered of [writeSrt(original.slice(0,1)),writeSrt([...original].reverse()),candidate.replace('\n2\n','\n3\n'),candidate.replace('Second',''),candidate.replace('00:00:01,000','00:00:01,004'),candidate.replace('00:00:03,000 -->','00:00:02,999 -->'),candidate.replace('00:00:01,000','00:60:01,000'),candidate.replace(' --> ',' -> ')]) {
+  assert.throws(()=>validateReviewedSrt(candidate,altered,original,6));
+}
+validateReviewedSrt(candidate,candidate.replace('00:00:01,000','00:00:01,002'),original,6);
+validateReviewedSrt(candidate,candidate.replace('00:00:01,000','00:00:01,003'),original,6);
 const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'bluray-receipt-test-'));
 try {
   const file=path.join(scratch,'relocated.mp4'),receiptFile=path.join(scratch,'receipt.json');fs.writeFileSync(file,'test');

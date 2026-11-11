@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Blu-ray to MP4</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f5f8;color:#202938;font:15px system-ui,sans-serif}main{max-width:820px;margin:48px auto;padding:0 24px}h1{font-size:30px;letter-spacing:-1px;margin-bottom:8px}p{color:#596579;line-height:1.6}section,.panel{background:white;border:1px solid #dce2ea;border-radius:14px;padding:24px;margin:18px 0}h2{font-size:18px;margin:0 0 16px}label{display:block;font-weight:600;margin:14px 0 6px}input,select{width:100%;padding:11px;border:1px solid #bac5d4;border-radius:7px;font:inherit;background:white;color:inherit}input:focus,select:focus{outline:2px solid #3478de;outline-offset:2px}.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}small{display:block;color:#657286;margin-top:8px;line-height:1.5}button{border:0;border-radius:8px;background:#2563c7;color:white;padding:12px 19px;font:600 15px system-ui;cursor:pointer;margin-top:16px}button:disabled{opacity:.45;cursor:default}.secondary{background:#e8edf5;color:#33445d}summary{cursor:pointer;font-weight:600;color:#43536c}details{margin-top:18px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#172130;color:#dce7f7;border-radius:8px;padding:16px;max-height:350px;overflow:auto;font:12px/1.6 Consolas,monospace}.path-picker{display:flex;gap:8px}.path-picker input{min-width:0;flex:1}.path-picker button{margin:0;background:#e8edf5;color:#33445d}.compact{font-weight:600;line-height:1.8;margin-top:18px}#convert{width:100%;font-size:18px;padding:16px}#status{font-weight:600}#error,.warning{color:#a33320;white-space:pre-wrap;line-height:1.6}progress{width:100%;height:8px;accent-color:#2563c7;margin-top:14px}.check{display:flex;gap:10px;align-items:center;font-weight:400}.check input{width:18px;height:18px}#technical{white-space:pre-wrap;overflow-wrap:anywhere;color:#657286;font-size:12px;line-height:1.8}button:focus-visible{outline:3px solid #78a8f2;outline-offset:3px}[hidden]{display:none!important}@media(max-width:600px){main{margin:24px auto;padding:0 14px}.row{grid-template-columns:1fr}section,.panel{padding:18px}}
+</style>
+<main>
+<h1>Blu-ray to MP4</h1><p>Choose a disc. Keep the performance.</p>
+<section>
+<h2>Source</h2><label for="source">Blu-ray folder</label><input id="source" placeholder="Choose a Blu-ray folder">
+<small>Analysis starts automatically. Multi-disc folders let you choose a disc.</small>
+<div id="discChoice" hidden><label for="discSource">Which disc?</label><select id="discSource"></select></div>
+<div id="summary" class="compact" aria-live="polite"></div>
+<div id="dilemmas" hidden><p id="warnings" class="warning"></p>
+<div id="playlistChoice" hidden><label for="playlist">Which feature playlist?</label><select id="playlist"></select></div>
+<div id="interlaceChoice" hidden><label for="interlace">Picture type after checking playback</label><select id="interlace"><option value="">Choose picture type…</option><option value="progressive">Progressive</option><option value="interlaced">Interlaced</option></select></div>
+<button id="resolve" class="secondary">Analyze with these choices</button></div>
+</section>
+<section>
+<h2>Subtitles</h2>
+<div class="row"><div><label for="subtitleIndex">Language</label><select id="subtitleIndex"><option value="">Analyze a source first</option></select></div>
+<div><label for="subtitleMode">Include as</label><select id="subtitleMode"><option value="none">None (keep existing text)</option><option value="ocr">Selectable text</option><option value="burn">Burned into video</option></select></div></div>
+<small id="subtitleHint">Existing text subtitles are kept automatically.</small>
+</section>
+<section>
+<h2>Save as</h2><label for="output">MP4 file</label><input id="output" placeholder="Suggested automatically after analysis">
+<button id="convert" disabled>Convert</button>
+<small id="ready"></small>
+</section>
+<section id="activity"><div id="status" role="status" aria-live="polite">Choose a Blu-ray folder to begin.</div><progress id="progress" hidden aria-label="Conversion in progress"></progress><p id="error" role="alert"></p>
+<div id="review" hidden><h2>SRT ready for external review</h2><p>Open candidate.srt and give it to a human or external AI for proofreading. Save corrections as a separate reviewed.srt. Change only subtitle text: keep cue numbers, order, and timestamps. The app validates the structure before converting and muxing.</p><pre id="reviewInfo"></pre><button id="openCandidate" class="secondary">Open SRT for review</button><label for="reviewedSrt">Reviewed SRT</label><input id="reviewedSrt"><button id="resume">Validate, convert & mux reviewed SRT</button></div>
+<details><summary>Details</summary><pre id="log">No jobs yet.</pre></details>
+</section>
+<details id="advanced" class="panel"><summary>Advanced / Troubleshooting</summary>
+<p>Optional overrides. Analysis plans and subtitle caches are managed automatically.</p>
+<div class="row"><div><label for="title">Title override</label><input id="title"></div><div><label for="audio">Default audio stream index</label><input id="audio" type="number" min="0" placeholder="Automatic"></div></div>
+<label for="plan">Inspection plan override</label><input id="plan" placeholder="Automatic — new plan for each analysis"><small>A manually selected plan path must be new. Its parent folder must exist.</small>
+<label for="subtitleWorkdir">Subtitle work/cache folder override</label><input id="subtitleWorkdir" placeholder="Automatic">
+<div class="row"><div><label for="ffmpeg">FFmpeg executable</label><input id="ffmpeg" placeholder="ffmpeg"></div><div><label for="ffprobe">FFprobe executable</label><input id="ffprobe" placeholder="ffprobe"></div></div>
+<label for="seconv">Subtitle Edit SeConv executable</label><input id="seconv" placeholder="Detect automatically">
+<label for="tesseractDir">Tesseract folder</label><input id="tesseractDir" placeholder="Detect automatically">
+<button id="reanalyze" class="secondary">Reanalyze source</button><button id="recover" class="secondary" hidden>Recover completed partial</button>
+<p id="technical"></p><details><summary>Full analysis</summary><pre id="json"></pre></details>
+</details>
+</main>
+<script>
+const token='__TOKEN__', $=id=>document.getElementById(id);
+const fields=['source','output','title','audio','plan','subtitleWorkdir','ffmpeg','ffprobe','seconv','tesseractDir','subtitleMode','subtitleIndex','playlist','interlace','reviewedSrt'];
+const pickerFields=['source','output','plan','ffmpeg','ffprobe','subtitleWorkdir','seconv','tesseractDir','reviewedSrt'];
+let state=null,report=null,picking=false,requesting=false,sourceDirty=false,autoOutput='',timer;
+async function api(url,body){const response=await fetch(url,{method:body?'POST':'GET',headers:{'x-gui-token':token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const data=await response.json();if(!response.ok)throw Error(data.error);return data;}
+function values(){return Object.fromEntries(fields.map(id=>[id,$(id).value]));}
+const language=code=>({eng:'English',ger:'German',deu:'German',fre:'French',fra:'French',ita:'Italian',spa:'Spanish',nor:'Norwegian',nob:'Norwegian',jpn:'Japanese',und:'Unknown language'}[code]||code||'Unknown language');
+function duration(seconds){const total=Math.round(seconds);return [Math.floor(total/3600),Math.floor(total/60)%60,total%60].map((n,i)=>i?String(n).padStart(2,'0'):n).join(':');}
+function defaultMode(){
+  const toolsReady=!!(($('seconv').value||state?.tools.seconv)&&($('tesseractDir').value||state?.tools.tesseractDir));
+  const track=report?.subtitleTracks.find(t=>String(t.index)===$('subtitleIndex').value);
+  const existing=track&&report.subtitles.some(t=>t.tags?.language===track.tags?.language);
+  const hasCandidates=report?.subtitleTracks.some(t=>t.codec_name==='hdmv_pgs_subtitle'&&/^[a-z]{3}$/.test(t.tags?.language||''));
+  $('subtitleMode').value=hasCandidates&&toolsReady&&!existing?'ocr':'none';
+}
+function controls(){
+  const locked=picking||requesting||!!state?.busy;
+  fields.forEach(id=>$(id).disabled=locked);$('discSource').disabled=locked;
+  document.querySelectorAll('[data-picker]').forEach(b=>b.disabled=locked);
+  for(const id of ['resolve','reanalyze','recover','openCandidate'])$(id).disabled=locked;
+  const mode=$('subtitleMode').value,track=report?.subtitleTracks.find(t=>String(t.index)===$('subtitleIndex').value);
+  const toolsReady=!!(($('seconv').value||state?.tools.seconv)&&($('tesseractDir').value||state?.tools.tesseractDir));
+  const needsTrack=mode!=='none'&&!track,duplicate=mode==='ocr'&&track&&report.subtitles.some(t=>t.tags?.language===track.tags?.language);
+  const ready=report&&!sourceDirty&&!report.warnings.length&&!needsTrack&&!duplicate&&(mode!=='ocr'||toolsReady)&&$('output').value.trim();
+  $('convert').disabled=locked||!ready||!!state?.review;
+  $('resume').disabled=locked||!$('reviewedSrt').value.trim();
+  $('ready').textContent=sourceDirty?'Analyzing your source is required.':report?.warnings.length?'Resolve the source question above to continue.':needsTrack?'Choose a subtitle track to continue.':duplicate?'This language already has selectable text. Choose None to keep it.':mode==='ocr'&&!toolsReady?'Set SeConv and Tesseract paths in Advanced / Troubleshooting.':ready?'Ready to convert ✓':'';
+  $('subtitleHint').textContent=mode==='burn'?'Subtitles will become a permanent part of the picture and cannot be switched off.':mode==='ocr'?'Create candidate.srt → proofread externally → supply reviewed.srt → validate, mux, and verify. Video and audio are converted once.':'Existing text subtitles are kept; PGS images are omitted. Selectable PGS text needs SeConv and Tesseract.';
+}
+function showReport(p){
+  report=p;$('summary').textContent='';$('json').textContent=p?JSON.stringify(p,null,2):'';
+  $('subtitleIndex').replaceChildren(new Option(p?'Choose a PGS track…':'Analyze a source first',''));
+  $('dilemmas').hidden=!p?.warnings.length;
+  if(!p)return;
+  const tracks=p.subtitleTracks.filter(t=>t.codec_name==='hdmv_pgs_subtitle');
+  for(const t of tracks){const option=new Option(language(t.tags?.language)+' · '+(t.tags?.title||'PGS')+' · stream '+t.index,String(t.index));option.disabled=!/^[a-z]{3}$/.test(t.tags?.language||'');$('subtitleIndex').add(option);}
+  const valid=tracks.filter(t=>/^[a-z]{3}$/.test(t.tags?.language||'')),english=valid.filter(t=>t.tags.language==='eng');
+  if(english.length===1)$('subtitleIndex').value=String(english[0].index);else if(valid.length===1)$('subtitleIndex').value=String(valid[0].index);
+  if(!tracks.length)$('subtitleIndex').options[0].textContent='No PGS tracks (existing text is retained)';
+  const audio=[...new Set(p.retainedAudio.map(t=>language(t.tags?.language)+' '+(t.channels===2?'stereo':({6:'5.1',5:'5.0',8:'7.1',1:'mono'}[t.channels]||t.channels+' channels'))))].join(' + ');
+  const subs=[...new Set(p.subtitleTracks.map(t=>language(t.tags?.language)+' '+(t.codec_name==='hdmv_pgs_subtitle'?'PGS':'text')))].join(' + ')||'No subtitles';
+  $('summary').textContent=p.title+' · '+duration(p.feature.duration)+' · '+p.video.height+(p.interlace.state==='interlaced'?'i':p.interlace.state==='progressive'?'p':' (picture type uncertain)')+' · '+audio+' · '+subs+' · '+p.feature.chapters.length+' chapters';
+  $('warnings').textContent=p.warnings.join('\n');
+  $('playlistChoice').hidden=!p.warnings.some(w=>/Competing feature/.test(w));
+  $('interlaceChoice').hidden=!p.warnings.some(w=>/Interlace uncertain/.test(w));
+  $('playlist').replaceChildren(new Option('Choose a playlist…',''),...p.candidates.map(c=>new Option(c.playlist+' · '+duration(c.duration)+' · '+c.clips.length+' clips',String(Number(c.playlist)))));
+  $('resolve').hidden=$('playlistChoice').hidden&&$('interlaceChoice').hidden;
+  defaultMode();
+}
+async function poll(){try{
+  state=await api('/status');$('status').textContent=state.status;$('progress').hidden=!state.busy;$('error').textContent=state.error||'';$('log').textContent=state.log||'No jobs yet.';
+  if(!sourceDirty&&JSON.stringify(state.report)!==JSON.stringify(report))showReport(state.report);
+  if(state.report&&!$('source').value&&!sourceDirty)$('source').value=state.report.source;
+  if(state.phase==='choose-disc'){$('discChoice').hidden=false;const current=$('discSource').value;const options=state.sources.join('|');if($('discSource').dataset.options!==options){$('discSource').replaceChildren(new Option('Choose a disc…',''),...state.sources.map(s=>new Option(s,s)));$('discSource').dataset.options=options;$('discSource').value=current;}}
+  else $('discChoice').hidden=true;
+  if(state.report&&!sourceDirty&&state.output!==autoOutput){if(!$('output').value||$('output').value===autoOutput)$('output').value=state.output;autoOutput=state.output;}
+  $('review').hidden=!state.review;if(state.review)$('reviewInfo').textContent=state.review.reviewNeeded.length+' flagged item(s)\nCandidate: '+state.review.candidate+'\nReview report: '+state.review.report;
+  $('recover').hidden=state.phase!=='error'||!state.recoverable;
+  $('technical').textContent='Plan: '+state.planPath+'\nWork/cache: '+state.workdir+'\nDetected SeConv: '+(state.tools.seconv||'not found')+'\nDetected Tesseract: '+(state.tools.tesseractDir||'not found');
+  controls();
+}catch(error){$('status').textContent='Disconnected — check the GUI terminal.';$('convert').disabled=true;}}
+async function run(action){
+  clearTimeout(timer);requesting=true;controls();$('error').textContent='';
+  try{const data=values();if(action==='inspect'&&data.output===autoOutput)data.output='';await api('/run',{...data,action});if(action==='inspect'){sourceDirty=false;showReport(null);}await poll();}catch(error){$('error').textContent=error.message;}finally{requesting=false;controls();}
+}
+function sourceChanged(){sourceDirty=true;showReport(null);$('interlace').value='';controls();clearTimeout(timer);timer=setTimeout(()=>{if($('source').value.trim()&&!state?.busy&&!picking)run('inspect');},700);}
+for(const id of pickerFields){
+  const input=$(id),wrapper=document.createElement('div'),browse=document.createElement('button');wrapper.className='path-picker';input.before(wrapper);wrapper.append(input,browse);
+  browse.type='button';browse.textContent='Browse…';browse.dataset.picker=id;browse.setAttribute('aria-label','Browse for '+document.querySelector('label[for="'+id+'"]').textContent);
+  if(id==='reviewedSrt')browse.textContent='Use reviewed SRT…';
+  browse.onclick=async()=>{picking=true;controls();try{const result=await api('/pick',{field:id,current:input.value});if(result.path){input.value=result.path;input.dispatchEvent(new Event('input',{bubbles:true}));if(id==='source'){clearTimeout(timer);picking=false;$('plan').value='';$('playlist').value='';$('interlace').value='';await run('inspect');}}}catch(error){$('error').textContent=error.message;}finally{picking=false;controls();}};
+}
+$('source').addEventListener('input',sourceChanged);
+$('discSource').onchange=()=>{if($('discSource').value){$('source').value=$('discSource').value;sourceDirty=true;$('plan').value='';run('inspect');}};
+for(const id of ['title','audio','ffmpeg','ffprobe','plan'])$(id).addEventListener('input',()=>{sourceDirty=true;controls();});
+for(const id of ['output','subtitleMode','subtitleIndex','subtitleWorkdir','reviewedSrt'])$(id).addEventListener('input',controls);
+for(const id of ['seconv','tesseractDir'])$(id).addEventListener('input',()=>{defaultMode();controls();});
+$('convert').onclick=()=>run('convert');$('resume').onclick=()=>run('resume');$('recover').onclick=()=>run('recover');$('resolve').onclick=()=>run('inspect');$('reanalyze').onclick=()=>run('inspect');
+$('openCandidate').onclick=async()=>{try{await api('/open-candidate',{});}catch(error){$('error').textContent=error.message;}};
+setInterval(poll,1000);poll();
+</script>
+</html>

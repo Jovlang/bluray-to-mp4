@@ -122,12 +122,12 @@ export function supTimes(buffer) {
 }
 
 export function parseSrt(text) {
-  const time = t => {const [h,m,s,ms] = t.split(/[:,]/).map(Number); return h*3600+m*60+s+ms/1000;};
+  const time = t => {const [h,m,s,ms] = t.split(/[:,]/).map(Number); if(m>59||s>59)throw Error('Invalid SRT timestamp');return h*3600+m*60+s+ms/1000;};
   const blocks = text.replace(/^\uFEFF/, '').replace(/\r/g, '').trim().split(/\n\s*\n/);
   return blocks.map((block, i) => {
     const lines = block.split('\n');
     const timing = lines[1]?.match(/^(\d{2,}:\d{2}:\d{2},\d{3}) --> (\d{2,}:\d{2}:\d{2},\d{3})$/);
-    if (!/^\d+$/.test(lines[0]) || !timing || !lines.slice(2).join('\n').trim()) throw Error('Invalid/empty SRT cue '+(i+1));
+    if (lines[0] !== String(i+1) || !timing || !lines.slice(2).join('\n').trim()) throw Error('Invalid/empty SRT cue or cue order at '+(i+1));
     return {start: time(timing[1]), end: time(timing[2]), text: lines.slice(2).join('\n')};
   });
 }
@@ -143,9 +143,17 @@ export function writeSrt(cues) {
 export function checkTiming(cues, expected, duration) {
   if (cues.length !== expected.length) throw Error(`OCR cue count mismatch: ${cues.length} vs ${expected.length}`);
   cues.forEach((c,i) => {
-    if (c.start < 0 || c.end <= c.start || c.end > duration+.003 || (i && c.start < cues[i-1].end-.003)) throw Error('Invalid/overlapping cue '+(i+1));
-    if (Math.abs(c.start-expected[i].start) > .003 || Math.abs(c.end-expected[i].end) > .003) throw Error('OCR changed source timing at cue '+(i+1));
+    if (!Number.isFinite(c.start)||!Number.isFinite(c.end)||!c.text?.trim()||c.start < 0 || c.end <= c.start || c.end > duration+.003 || (i && c.start < cues[i-1].end)) throw Error('Invalid/empty/overlapping cue '+(i+1));
+    if (Math.abs(c.start-expected[i].start) > .003+1e-9 || Math.abs(c.end-expected[i].end) > .003+1e-9) throw Error('OCR changed source timing at cue '+(i+1));
   });
+}
+
+export function validateReviewedSrt(candidateText,reviewedText,expected,duration) {
+  const original=parseSrt(candidateText),reviewed=parseSrt(reviewedText);
+  checkTiming(original,expected,duration);
+  checkTiming(reviewed,expected,duration);
+  checkTiming(reviewed,original,duration);
+  return reviewed;
 }
 
 export function reviewOcr(cues) {
@@ -278,9 +286,10 @@ export function ocrSubtitles(ctx) {
   console.log(JSON.stringify({candidate,report:path.join(directory,'review.json'),cues:expected.length,automaticFixes:review.fixes.length,reviewNeeded:review.issues.length},null,2));
   if(ctx.args.includes('--prepare-only'))return;
   const reviewed=opt('reviewed-srt');
-  if(!reviewed && review.issues.length)throw Error('Review flagged text, save a separate reviewed SRT, then rerun with --reviewed-srt PATH');
-  const srt=path.resolve(reviewed||candidate), cues=parseSrt(fs.readFileSync(srt,'utf8'));
-  checkTiming(cues,expected,p.feature.duration);
+  if(!reviewed)throw Error('OCR candidate is ready for external proofreading. Save a separate reviewed SRT, then rerun with --reviewed-srt PATH');
+  const srt=path.resolve(reviewed);
+  if(srt===path.resolve(candidate)||fs.realpathSync(srt)===fs.realpathSync(candidate))throw Error('Save proofreading changes as a separate reviewed SRT; preserve candidate.srt');
+  const cues=validateReviewedSrt(fs.readFileSync(candidate,'utf8'),fs.readFileSync(srt,'utf8'),expected,p.feature.duration);
   const {file:baseFile,plan:basePlan,probe:baseProbe}=verifiedBase(ctx,p,identity);
   if(basePlan.subtitles.some(t=>t.tags?.language===language))throw Error('Base MP4 already has text subtitles in '+language+'; preserved instead of duplicating them');
   const output=path.resolve(opt('output',baseFile.replace(/\.mp4$/i,'')+' - '+language+' subtitles.mp4'));

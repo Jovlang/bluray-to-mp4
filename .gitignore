@@ -1,5 +1,8 @@
 # Local media and inspection/verification artifacts
 node_modules/
+.test-tmp/
+tools/SeConv/
+tools/Tesseract/
 work/
 *.mp4
 *.m2ts

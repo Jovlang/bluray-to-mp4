@@ -80,7 +80,7 @@ Mux the reviewed text:
 node .\apple-mp4.mjs ocr-subtitles --plan "Opera.plan.json" --language eng --seconv "D:\Tools\SeConv\seconv.exe" --tesseract-dir "D:\Tools\Tesseract" --workdir "D:\OCR\Opera" --reviewed-srt "D:\OCR\Opera\reviewed.srt" --output "D:\Converted\Opera - English.mp4"
 ```
 
-Without `--prepare-only`, the command stops if text is flagged and no reviewed SRT was supplied; otherwise it can complete in one pass. A reviewed SRT means the caller has checked its text. Timings and counts are always checked against the PGS display events, with at most 3 ms of rounding tolerance.
+Without `--prepare-only`, the command requires `--reviewed-srt`, even when no OCR text was flagged. Proofread with a human or external AI and save a separate reviewed SRT; `candidate.srt` remains an immutable reference. The app does not perform AI correction. Validation requires the same cue count and sequential cue numbers/order, nonempty text, valid timestamps, and no overlaps. Each cue's start/end must match both the candidate and the original PGS display events within 3 ms. Only text may change. The verified remux checks the extracted subtitle's text and timing again after muxing.
 
 The existing MP4 is preserved. The new file contains all existing video, audio, and text subtitles, plus a selectable, non-forced, non-default `mov_text` track labeled English (`eng`). Other languages use their ISO 639-2 label. Audio default flags, metadata and chapters are retained. Before promotion, the command compares SHA-256 hashes of **every copied video/audio payload**, fully decodes the new MP4, checks all codecs and metadata, compares chapters, and extracts the new subtitle back to SRT to verify every text and timing value. It creates a matching verification receipt and a standalone SRT next to the result.
 
@@ -109,3 +109,21 @@ Only `ocr-subtitles` accepts `--base-mp4 "D:\Archive\Opera.mp4" --base-receipt "
 ### Interruption-tolerant encoding
 
 With a recent FFmpeg supporting `hybrid_fragmented`, add `--resilient` to `encode` or `burn-pgs`. Encoding writes a checkpoint MP4 whose completed keyframe fragments remain readable after an abrupt interruption. At successful completion the converter stream-copies it to the ordinary faststart MP4, compares every encoded video/audio payload hash, then runs the usual full verification and safe promotion. No additional video/audio encoding is performed. The checkpoint is a recovery artifact, not the deliverable; it is retained beside the output for inspection. Incomplete checkpoints do not satisfy the full-duration checks, and this option does not implement automatic mid-file resume. Existing checkpoints are never overwritten.
+## Simple GUI
+
+Run `npm run gui` (Node.js 20+; no npm install needed). Keep the terminal open. If the browser does not open, use the localhost URL printed in the terminal.
+
+1. **Source:** browse to a Blu-ray folder. Analysis starts automatically and shows a compact title, duration, picture, audio, subtitle, and chapter summary. For a parent containing multiple discs, choose one disc. Competing playlists or uncertain interlacing prompt for a specific choice; unambiguous sources show **Ready to convert ✓** without a general review checkbox.
+2. **Subtitles:** choose a language and **Selectable text**, **Burned into video**, or **None (keep existing text)**. Existing text tracks are always retained. English PGS is selected when unique; selectable PGS text is the default when SeConv and Tesseract are detected. Multiple matching tracks require a choice. Burned subtitles are permanent; selectable text can be switched off.
+3. **Save as:** the app suggests an MP4 filename from the source title/folder. Browse to change it. Changing the destination does not require analyzing the disc again.
+4. **Convert:** one button handles ordinary conversion, direct PGS burning, or OCR preparation. Selectable PGS always stops with **SRT ready for external review**. **Open SRT for review** opens the candidate (in Notepad on Windows). Have a human or external AI proofread the text and save a separate `reviewed.srt`; the app does not perform AI correction. Choose **Use reviewed SRT…**, then **Validate, convert & mux reviewed SRT**. Cue count, numbering/order, nonempty text, timing (3 ms tolerance), and absence of overlaps are checked before encoding. The existing verified remux adds the corrected text as selectable `mov_text` and verifies it again.
+
+The single status display follows analysis, OCR, encoding, and verification. Detailed FFmpeg/hash/verification output is collapsed under **Details**. Existing outputs are never replaced.
+
+**Advanced / Troubleshooting** contains title/audio overrides, tool paths, an optional inspection-plan path, a subtitle work/cache override, the generated plan/cache locations, and full analysis. Plans and caches are normally automatic. A unique conversion folder beside the output keeps the execution plan, subtitle cache, and (for OCR) the verified intermediate MP4. Keep these artifacts for troubleshooting; the app does not delete them automatically. Small inspection plans use the system temporary directory. Custom inspection-plan paths must be new and have an existing parent folder.
+
+SeConv and Tesseract are detected on PATH, in standard Windows installation folders, or in local `tools/SeConv` and `tools/Tesseract` folders. Set other locations in Advanced. Both tools must already be installed; the app does not download them. A selected PGS language needs three-letter source metadata.
+
+A **Recover completed partial** action appears in Advanced after an encode/promotion failure in the current session. It re-verifies and finalizes the completed partial; it does not resume an interrupted encode. Closing the browser does not stop an active job; reopen the printed URL to reconnect. Keep the server running through OCR review. After a server restart, the CLI can recover using the saved execution plan and cache. Stop the server with Ctrl+C when finished.
+
+Run `npm run test:gui` for controller, client-state, picker-script, and HTTP checks. Run `npm test` for the real FFmpeg conversion/subtitle regression suite.
