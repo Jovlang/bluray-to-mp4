@@ -19,6 +19,10 @@ const workflow=new GuiWorkflow((mode,args,append)=>new Promise((resolve,reject)=
 }));
 const reply=(res,code,data)=>{res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
 const server=http.createServer(async(req,res)=>{
+  if(req.method==='GET'&&req.url==='/favicon.svg'){
+    res.writeHead(200,{'Content-Type':'image/svg+xml'});
+    res.end(fs.readFileSync(path.join(root,'favicon.svg')));return;
+  }
   if(req.method==='GET'&&req.url==='/'){
     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"});
     res.end(fs.readFileSync(path.join(root,'gui.html'),'utf8').replace('__TOKEN__',token));return;
