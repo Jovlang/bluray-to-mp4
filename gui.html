@@ -3,7 +3,7 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Blu-ray to MP4</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#f3f5f8;color:#202938;font:15px system-ui,sans-serif}main{max-width:820px;margin:48px auto;padding:0 24px}h1{font-size:30px;letter-spacing:-1px;margin-bottom:8px}p{color:#596579;line-height:1.6}section,.panel{background:white;border:1px solid #dce2ea;border-radius:14px;padding:24px;margin:18px 0}h2{font-size:18px;margin:0 0 16px}label{display:block;font-weight:600;margin:14px 0 6px}input,select{width:100%;padding:11px;border:1px solid #bac5d4;border-radius:7px;font:inherit;background:white;color:inherit}input:focus,select:focus{outline:2px solid #3478de;outline-offset:2px}.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}small{display:block;color:#657286;margin-top:8px;line-height:1.5}button{border:0;border-radius:8px;background:#2563c7;color:white;padding:12px 19px;font:600 15px system-ui;cursor:pointer;margin-top:16px}button:disabled{opacity:.45;cursor:default}.secondary{background:#e8edf5;color:#33445d}summary{cursor:pointer;font-weight:600;color:#43536c}details{margin-top:18px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#172130;color:#dce7f7;border-radius:8px;padding:16px;max-height:350px;overflow:auto;font:12px/1.6 Consolas,monospace}.path-picker{display:flex;gap:8px}.path-picker input{min-width:0;flex:1}.path-picker button{margin:0;background:#e8edf5;color:#33445d}.compact{font-weight:600;line-height:1.8;margin-top:18px}#convert{width:100%;font-size:18px;padding:16px}#status{font-weight:600}#error,.warning{color:#a33320;white-space:pre-wrap;line-height:1.6}progress{width:100%;height:8px;accent-color:#2563c7;margin-top:14px}.check{display:flex;gap:10px;align-items:center;font-weight:400}.check input{width:18px;height:18px}#technical{white-space:pre-wrap;overflow-wrap:anywhere;color:#657286;font-size:12px;line-height:1.8}button:focus-visible{outline:3px solid #78a8f2;outline-offset:3px}[hidden]{display:none!important}@media(max-width:600px){main{margin:24px auto;padding:0 14px}.row{grid-template-columns:1fr}section,.panel{padding:18px}}
+*{box-sizing:border-box}body{margin:0;background:#f3f5f8;color:#202938;font:15px system-ui,sans-serif}main{max-width:820px;margin:48px auto;padding:0 24px}h1{font-size:30px;letter-spacing:-1px;margin-bottom:8px}p{color:#596579;line-height:1.6}section,.panel{background:white;border:1px solid #dce2ea;border-radius:14px;padding:24px;margin:18px 0}h2{font-size:18px;margin:0 0 16px}label{display:block;font-weight:600;margin:14px 0 6px}textarea{width:100%;min-height:85px;padding:11px;font:inherit}input,select{width:100%;padding:11px;border:1px solid #bac5d4;border-radius:7px;font:inherit;background:white;color:inherit}input:focus,select:focus{outline:2px solid #3478de;outline-offset:2px}.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}small{display:block;color:#657286;margin-top:8px;line-height:1.5}button{border:0;border-radius:8px;background:#2563c7;color:white;padding:12px 19px;font:600 15px system-ui;cursor:pointer;margin-top:16px}button:disabled{opacity:.45;cursor:default}.secondary{background:#e8edf5;color:#33445d}summary{cursor:pointer;font-weight:600;color:#43536c}details{margin-top:18px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#172130;color:#dce7f7;border-radius:8px;padding:16px;max-height:350px;overflow:auto;font:12px/1.6 Consolas,monospace}.path-picker{display:flex;gap:8px}.path-picker input{min-width:0;flex:1}.path-picker button{margin:0;background:#e8edf5;color:#33445d}.compact{font-weight:600;line-height:1.8;margin-top:18px}#convert{width:100%;font-size:18px;padding:16px}#status{font-weight:600}#error,.warning{color:#a33320;white-space:pre-wrap;line-height:1.6}progress{width:100%;height:8px;accent-color:#2563c7;margin-top:14px}.check{display:flex;gap:10px;align-items:center;font-weight:400}.check input{width:18px;height:18px}#technical{white-space:pre-wrap;overflow-wrap:anywhere;color:#657286;font-size:12px;line-height:1.8}button:focus-visible{outline:3px solid #78a8f2;outline-offset:3px}[hidden]{display:none!important}@media(max-width:600px){main{margin:24px auto;padding:0 14px}.row{grid-template-columns:1fr}section,.panel{padding:18px}}
 </style>
 <main>
 <h1>Blu-ray to MP4</h1><p>Choose a disc. Keep the performance.</p>
@@ -32,7 +32,7 @@
 <small id="ready"></small>
 </section>
 <section id="activity"><div id="status" role="status" aria-live="polite">Choose a Blu-ray folder to begin.</div><progress id="progress" hidden aria-label="Conversion in progress"></progress><p id="error" role="alert"></p>
-<div id="review" hidden><h2>SRT ready for external review</h2><p>Open candidate.srt and give it to a human or external AI for proofreading. Save corrections as a separate reviewed.srt. Change only subtitle text: keep cue numbers, order, and timestamps. The app validates the structure before converting and muxing.</p><pre id="reviewInfo"></pre><button id="openCandidate" class="secondary">Open SRT for review</button><label for="reviewedSrt">Reviewed SRT</label><input id="reviewedSrt"><button id="resume">Validate, convert & mux reviewed SRT</button></div>
+<div id="review" hidden><h2>Review subtitles</h2><p>Edit flagged text using the surrounding dialogue. Flags may miss errors; open the full candidate to proofread further. Saving creates reviewed.srt and validates timing.</p><div id="reviewItems"></div><button id="saveReview">Save review, convert &amp; mux</button><p>Or use an externally proofread file:</p><pre id="reviewInfo"></pre><button id="openCandidate" class="secondary">Open SRT for review</button><label for="reviewedSrt">Reviewed SRT</label><input id="reviewedSrt"><button id="resume">Validate, convert & mux reviewed SRT</button></div>
 <details><summary>Details</summary><pre id="log">No jobs yet.</pre></details>
 </section>
 <details id="advanced" class="panel"><summary>Advanced / Troubleshooting</summary>
@@ -79,8 +79,10 @@ function controls(){
   const ready=report&&!sourceDirty&&!report.warnings.length&&!noAudio&&!needsTrack&&!duplicate&&(mode!=='ocr'||toolsReady)&&$('output').value.trim();
   $('convert').disabled=locked||!ready||!!state?.review;
   $('resume').disabled=locked||!$('reviewedSrt').value.trim();
+  $('saveReview').disabled=locked||!state?.review;
+  document.querySelectorAll('#reviewItems textarea').forEach(input=>input.disabled=locked);
   $('ready').textContent=sourceDirty?'Analyzing your source is required.':report?.warnings.length?'Resolve the source question above to continue.':noAudio?'Select at least one audio track.':needsTrack?'Choose a subtitle track to continue.':duplicate?'This language already has selectable text. Choose None to keep it.':mode==='ocr'&&!toolsReady?'Set SeConv and Tesseract paths in Advanced / Troubleshooting.':ready?'Ready to convert ✓':'';
-  $('subtitleHint').textContent=mode==='burn'?'Subtitles will become a permanent part of the picture and cannot be switched off.':mode==='ocr'?'Create candidate.srt → proofread externally → supply reviewed.srt → validate, mux, and verify. Video and audio are converted once.':'Existing text subtitles are kept; PGS images are omitted. Selectable PGS text needs SeConv and Tesseract.';
+  $('subtitleHint').textContent=mode==='burn'?'Subtitles will become a permanent part of the picture and cannot be switched off.':mode==='ocr'?'Create candidate.srt → review in the app → save reviewed.srt → validate, mux, and verify. Video and audio are converted once.':'Existing text subtitles are kept; PGS images are omitted. Selectable PGS text needs SeConv and Tesseract.';
 }
 function showReport(p){
   const keepSubtitle=!!(p&&report&&p.source===report.source),previousTrack=$('subtitleIndex').value,previousMode=$('subtitleMode').value,previousPid=report?.subtitleTracks.find(t=>String(t.index)===previousTrack)?.id;
@@ -106,6 +108,19 @@ function showReport(p){
   defaultMode();
   if(keepSubtitle){const match=p.subtitleTracks.find(t=>previousPid!==undefined&&Number(t.id)===Number(previousPid));$('subtitleIndex').value=match?String(match.index):previousTrack;$('subtitleMode').value=previousMode;}
 }
+let reviewKey='';
+function showReview(review){
+ const key=review?.candidate||'';if(key===reviewKey)return;reviewKey=key;
+ $('reviewItems').replaceChildren();if(!review)return;
+ if(!review.items.length){const note=document.createElement('p');note.textContent='No flagged cues. Inspect the full candidate before accepting it.';$('reviewItems').append(note);}
+ for(const item of review.items){
+  const label=document.createElement('label'),before=document.createElement('small'),input=document.createElement('textarea'),after=document.createElement('small');
+  input.id='cue-'+item.cue;input.dataset.cue=item.cue;input.value=item.text;
+  label.htmlFor=input.id;label.textContent='Cue '+item.cue+' · '+(item.reasons||[]).join(', ');
+  before.textContent='Before: '+item.previous;after.textContent='After: '+item.next;
+  $('reviewItems').append(label,before,input,after);
+ }
+}
 async function poll(){try{
   state=await api('/status');$('status').textContent=state.status;$('progress').hidden=!state.busy;$('error').textContent=state.error||'';$('log').textContent=state.log||'No jobs yet.';
   if(!sourceDirty&&JSON.stringify(state.report)!==JSON.stringify(report))showReport(state.report);
@@ -113,14 +128,14 @@ async function poll(){try{
   if(state.phase==='choose-disc'){$('discChoice').hidden=false;const current=$('discSource').value;const options=state.sources.join('|');if($('discSource').dataset.options!==options){$('discSource').replaceChildren(new Option('Choose a disc…',''),...state.sources.map(s=>new Option(s,s)));$('discSource').dataset.options=options;$('discSource').value=current;}}
   else $('discChoice').hidden=true;
   if(state.report&&!sourceDirty&&state.output!==autoOutput){if(!$('output').value||$('output').value===autoOutput)$('output').value=state.output;autoOutput=state.output;}
-  $('review').hidden=!state.review;if(state.review)$('reviewInfo').textContent=state.review.reviewNeeded.length+' flagged item(s)\nCandidate: '+state.review.candidate+'\nReview report: '+state.review.report;
+  showReview(state.review);$('review').hidden=!state.review;if(state.review)$('reviewInfo').textContent=state.review.reviewNeeded.length+' flagged item(s)\nCandidate: '+state.review.candidate+'\nReview report: '+state.review.report;
   $('recover').hidden=state.phase!=='error'||!state.recoverable;
   $('technical').textContent='Plan: '+state.planPath+'\nWork/cache: '+state.workdir+'\nDetected SeConv: '+(state.tools.seconv||'not found')+'\nDetected Tesseract: '+(state.tools.tesseractDir||'not found')+'\n'+(state.report?.timings||[]).map(t=>t.step+': '+t.ms+' ms').join('\n');
   controls();
 }catch(error){$('status').textContent='Disconnected — check the GUI terminal.';$('convert').disabled=true;}}
 async function run(action){
   clearTimeout(timer);requesting=true;controls();$('error').textContent='';
-  try{const data=values();if(action==='inspect'&&data.output===autoOutput)data.output='';await api('/run',{...data,action});if(action==='inspect'){sourceDirty=false;showReport(null);}await poll();}catch(error){$('error').textContent=error.message;}finally{requesting=false;controls();}
+  try{const data=values();if(action==='review-inline'){action='resume';data.reviewEdits=Array.from(document.querySelectorAll('#reviewItems textarea'),input=>({cue:Number(input.dataset.cue),text:input.value}));}if(action==='inspect'&&data.output===autoOutput)data.output='';await api('/run',{...data,action});if(action==='inspect'){sourceDirty=false;showReport(null);}await poll();}catch(error){$('error').textContent=error.message;}finally{requesting=false;controls();}
 }
 function sourceChanged(){sourceDirty=true;showReport(null);$('interlace').value='';controls();clearTimeout(timer);timer=setTimeout(()=>{if($('source').value.trim()&&!state?.busy&&!picking)run('inspect');},700);}
 for(const id of pickerFields){
@@ -134,6 +149,7 @@ $('discSource').onchange=()=>{if($('discSource').value){$('source').value=$('dis
 for(const id of ['title','audio','ffmpeg','ffprobe','plan'])$(id).addEventListener('input',()=>{sourceDirty=true;controls();});
 for(const id of ['output','resolution','subtitleMode','subtitleIndex','subtitleWorkdir','reviewedSrt'])$(id).addEventListener('input',controls);
 for(const id of ['seconv','tesseractDir'])$(id).addEventListener('input',()=>{defaultMode();controls();});
+$('saveReview').onclick=()=>run('review-inline');
 $('convert').onclick=()=>run('convert');$('resume').onclick=()=>run('resume');$('recover').onclick=()=>run('recover');$('resolve').onclick=()=>run('inspect');$('reanalyze').onclick=()=>run('inspect');
 $('openCandidate').onclick=async()=>{try{await api('/open-candidate',{});}catch(error){$('error').textContent=error.message;}};
 setInterval(poll,1000);poll();

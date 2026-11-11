@@ -93,7 +93,7 @@ try {
     const plan=JSON.parse(fs.readFileSync(app.state.planPath));assert.notEqual(plan.output,app.state.output);
   }
   {
-    const {app,calls}=controller({issues:[{text:'suspicious'}]});await inspect(app);
+    const {app,calls}=controller({issues:[{cue:1,text:'suspicious'}]});await inspect(app);
     await app.start('convert',{output:path.join(scratch,'review.mp4'),subtitleMode:'ocr'});
     assert.equal(app.state.phase,'review');assert.equal(calls.length,4);assert(app.state.review.candidate);
     const reviewed=path.join(scratch,'reviewed.srt');fs.writeFileSync(reviewed,srt.replace('00:00:01,000','00:00:02,000'));
@@ -128,7 +128,19 @@ try {
   assert.equal(subtitleSelection(duplicate,'burn','5',{}).index,5);
   assert.throws(()=>subtitleSelection(fixture,'ocr','4',{ocrAvailable:false}),/SeConv/);
   assert.equal(suggestedOutput(source,'Opera: title'),path.join(scratch,'Opera  title.mp4'));
-  console.log('PASS: automatic analysis, destination binding, no-review conversion, direct PGS burning, OCR pipeline/review pause, ambiguity and warning gates, immutable plans, no-overwrite, and single-job control.');
+  {
+    const {app,calls}=controller({issues:[{cue:1,text:'Candidate text',reasons:['OCR']} ]});await inspect(app);
+    await app.start('convert',{output:path.join(scratch,'inline.mp4'),subtitleMode:'ocr'});
+    const candidate=app.state.review.candidate;
+    assert.equal(app.state.review.items[0].text,'Candidate text');
+    await app.start('resume',{reviewEdits:[]});assert.match(app.state.error,/every flagged cue/);assert.equal(calls.length,4);
+    await app.start('resume',{reviewEdits:[{cue:1,text:'Corrected\n\ninvalid'}]});assert.match(app.state.error,/Invalid subtitle edit/);
+    await app.start('resume',{reviewEdits:[{cue:1,text:'Corrected text'}]});
+    assert.equal(app.state.phase,'complete');
+    assert.equal(fs.readFileSync(candidate,'utf8'),srt);
+    assert.equal(fs.readFileSync(path.join(path.dirname(candidate),'reviewed.srt'),'utf8'),srt.replace('Candidate text','Corrected text'));
+  }
+  console.log('PASS: automatic analysis, destination binding, no-review conversion, direct PGS burning, OCR pipeline/review pause, inline review, ambiguity and warning gates, immutable plans, no-overwrite, and single-job control.');
 } finally {
   const targets=[scratch,...temporary];
   for(const target of targets){const resolved=path.resolve(target);assert(resolved.startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(resolved,{recursive:true,force:true});}

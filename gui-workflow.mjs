@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {findDiscSources} from './gui-source.mjs';
-import {validateReviewedSrt,supTimes} from './pgs-ocr.mjs';
+import {validateReviewedSrt,supTimes,parseSrt,writeSrt} from './pgs-ocr.mjs';
 import {selectTracks,expectedAudio} from './apple-mp4.mjs';
 import {applyVideoSettings} from './video-settings.mjs';
 const text=v=>typeof v==='string'?v.trim():'';
@@ -69,6 +69,21 @@ export class GuiWorkflow {
       this.state.phase='ready';this.state.status=report.warnings.length?'A source choice needs your attention':'Ready to convert ✓';return;
     }
     if(action==='resume') {
+      if(data.reviewEdits!==undefined){
+        const candidate=fs.readFileSync(path.join(this.task.workdir,'candidate.srt'),'utf8');
+        const cues=parseSrt(candidate),edits=data.reviewEdits;
+        const flagged=new Set(this.state.review.reviewNeeded.map(issue=>issue.cue));
+        if(!Array.isArray(edits)||edits.length!==flagged.size||new Set(edits.map(e=>e.cue)).size!==flagged.size)throw Error('Review every flagged cue before continuing');
+        for(const edit of edits){
+          if(!flagged.has(edit.cue)||!cues[edit.cue-1]||typeof edit.text!=='string'||!edit.text.trim()||/\r?\n\s*\r?\n/.test(edit.text))throw Error('Invalid subtitle edit');
+          cues[edit.cue-1].text=edit.text;
+        }
+        const reviewed=writeSrt(cues),plan=JSON.parse(fs.readFileSync(this.task.planPath,'utf8'));
+        validateReviewedSrt(candidate,reviewed,supTimes(fs.readFileSync(path.join(this.task.workdir,'timed.sup'))),plan.feature.duration);
+        const destination=path.join(this.task.workdir,'reviewed.srt');
+        fs.writeFileSync(destination,reviewed,{flag:'wx'});
+        data={...data,reviewedSrt:destination};
+      }
       if(!text(data.reviewedSrt))throw Error('Choose the proofread SRT to continue');
       const candidate=path.join(this.task.workdir,'candidate.srt'),reviewed=path.resolve(text(data.reviewedSrt));
       if(fs.realpathSync(candidate)===fs.realpathSync(reviewed))throw Error('Choose a separate reviewed SRT; preserve candidate.srt');
@@ -133,7 +148,8 @@ export class GuiWorkflow {
     if(mode==='ocr') {
       await this.step('ocr-subtitles',[...this.subtitleOptions(),...this.ocrOptions(),'--prepare-only'],'Reading subtitle images and recognizing text…');
       const review=JSON.parse(fs.readFileSync(path.join(workdir,'review.json'),'utf8'));
-      this.pending=true;this.state.phase='review';this.state.status='SRT ready for external review';this.state.review={...review,candidate:path.join(workdir,'candidate.srt'),report:path.join(workdir,'review.json')};return;
+      const cues=parseSrt(fs.readFileSync(path.join(workdir,'candidate.srt'),'utf8'));
+      this.pending=true;this.state.phase='review';this.state.status='Review subtitle text';this.state.review={...review,candidate:path.join(workdir,'candidate.srt'),report:path.join(workdir,'review.json'),items:review.reviewNeeded.map(issue=>({...issue,text:cues[issue.cue-1].text,previous:cues[issue.cue-2]?.text||'',next:cues[issue.cue]?.text||''}))};return;
     }
     await this.finishTask();
   }

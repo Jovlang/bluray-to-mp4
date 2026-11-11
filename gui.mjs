@@ -27,7 +27,7 @@ const server=http.createServer(async(req,res)=>{
   if(req.method==='GET'&&req.url==='/status')return reply(res,200,{...workflow.state,recoverable:!!workflow.failedCommand&&['encode','burn-pgs'].includes(workflow.failedCommand.mode)});
   if(req.method!=='POST'||!['/run','/pick','/open-candidate'].includes(req.url))return reply(res,404,{error:'Not found'});
   try{
-    let body='';for await(const chunk of req){body+=chunk;if(body.length>16384)throw Error('Request too large');}
+    let body='';for await(const chunk of req){body+=chunk;if(body.length>2*1024*1024)throw Error('Request too large');}
     const data=JSON.parse(body);
     if(workflow.state.busy)throw Error('A job is already running');
     if(picking)throw Error('Close the current file picker first');
