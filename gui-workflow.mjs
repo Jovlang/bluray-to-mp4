@@ -4,6 +4,7 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {findDiscSources} from './gui-source.mjs';
 import {validateReviewedSrt,supTimes} from './pgs-ocr.mjs';
+import {selectTracks,expectedAudio} from './apple-mp4.mjs';
 const text=v=>typeof v==='string'?v.trim():'';
 export function suggestedOutput(source,title) {
   const name=(title||path.basename(source)).replace(/[<>:"/\\|?*\x00-\x1f]/g,' ').replace(/[. ]+$/,'').trim()||'Movie';
@@ -30,7 +31,7 @@ export function subtitleSelection(plan,mode,index,tools) {
 export class GuiWorkflow {
   constructor(run) {
     this.run=run;
-    this.state={busy:false,phase:'idle',status:'Choose a Blu-ray folder to begin.',log:'',report:null,tools:findTools(),sources:[],review:null,output:'',planPath:'',workdir:'',error:''};
+    this.state={busy:false,phase:'idle',status:'Choose a Blu-ray folder to begin.',log:'',report:null,tools:findTools(),sources:[],review:null,output:'',planPath:'',workdir:'',error:'',audioUpdate:''};
   }
   tools(data) {
     const detected=findTools(),seconv=text(data.seconv)||detected.seconv,tesseractDir=text(data.tesseractDir)||detected.tesseractDir;
@@ -52,7 +53,7 @@ export class GuiWorkflow {
   }
   async execute(action,data) {
     if(action==='inspect') {
-      this.state.phase='inspecting';this.state.report=null;this.state.review=null;this.pending=null;this.task=null;this.failedCommand=null;
+      this.state.phase='inspecting';this.state.report=null;this.state.review=null;this.pending=null;this.task=null;this.failedCommand=null;this.state.audioUpdate='';
       const sources=findDiscSources(data.source);this.state.sources=sources;
       if(sources.length>1){this.state.phase='choose-disc';this.state.status='Choose a disc';return;}
       const source=sources[0];this.directory=fs.mkdtempSync(path.join(os.tmpdir(),'bluray-gui-'));
@@ -85,18 +86,48 @@ export class GuiWorkflow {
     if(fs.readFileSync(this.inspectionPath,'utf8')!==this.contents)throw Error('Inspection plan changed. Analyze the source again.');
     const plan=JSON.parse(this.contents);
     if(plan.warnings.length)throw Error(plan.warnings.join('\n'));
+    if(data.selectedAudioIndices!==undefined){
+      if(!Array.isArray(data.selectedAudioIndices))throw Error('Select at least one valid audio track');
+      plan.selectedAudioIndices=data.selectedAudioIndices;
+      const chosen=text(data.defaultAudio);
+      const preferred=chosen?Number(chosen):plan.audio?.index;
+      if(chosen&&!plan.selectedAudioIndices.includes(preferred))throw Error('The default audio track must be selected');
+      plan.requestedDefaultAudio=plan.selectedAudioIndices.includes(preferred)?preferred:undefined;
+      selectTracks(plan,plan.sourceProbe,plan.requestedDefaultAudio,new Map());
+      plan.expected.audio=expectedAudio(plan);
+    }
     const output=path.resolve(text(data.output)||this.state.output);
     if(!/\.mp4$/i.test(output))throw Error('Save as must end in .mp4');
     if(fs.existsSync(output))throw Error('Output already exists; choose a new Save as path.');
     const mode=text(data.subtitleMode)||'none',tools=this.tools(data),track=subtitleSelection(plan,mode,data.subtitleIndex,tools);
     const executionDirectory=path.join(path.dirname(output),'.'+path.basename(output,'.mp4')+'-conversion-'+randomUUID());
     fs.mkdirSync(executionDirectory,{recursive:true});
-    const planPath=path.join(executionDirectory,'conversion.plan.json');
+    let planPath=path.join(executionDirectory,'conversion-provisional.plan.json');
     plan.output=mode==='ocr'?path.join(executionDirectory,'base.mp4'):output;
     fs.writeFileSync(planPath,JSON.stringify(plan,null,2),{flag:'wx'});
+    this.state.phase='audio-preflight';
+    const mediaPath=path.join(executionDirectory,'media-preflight.plan.json');
+    this.state.phase='media-preflight';
+    await this.step('prepare-media',['--plan',planPath,'--prepared-plan',mediaPath,...this.toolArgs(data)],'Preparing conversion — probing tracks and sampling video');
+    const media=JSON.parse(fs.readFileSync(mediaPath,'utf8'));
+    this.state.report=media;this.state.planPath=mediaPath;
+    if(media.preflight?.status!=='complete')throw Error('Media preflight did not complete; encoding is blocked');
+    if(media.warnings.length){this.state.phase='ready';this.state.status='Preflight found a source question — review the choices above';return;}
+    // Match the selected metadata subtitle by PID, never by provisional stream index.
+    let finalTrack=track;
+    if(track){const matches=media.subtitleTracks.filter(t=>Number(t.id)===Number(track.id));if(matches.length!==1)throw Error('Selected subtitle could not be matched by PID');finalTrack=matches[0];}
+    const preparedPath=path.join(executionDirectory,'conversion.plan.json');
+    this.state.phase='audio-preflight';
+    await this.step('prepare-audio',['--plan',mediaPath,'--prepared-plan',preparedPath,...this.toolArgs(data)],'Preparing conversion — checking audio tracks for exact duplicates');
+    const prepared=JSON.parse(fs.readFileSync(preparedPath,'utf8'));
+    if(prepared.audioPreflight?.status!=='complete')throw Error('Audio duplicate detection did not complete; encoding is blocked');
+    this.state.report=prepared;
+    const removed=plan.retainedAudio.length-prepared.retainedAudio.length;
+    this.state.audioUpdate=removed>0?'Audio finalized: '+removed+' exact duplicate track(s) removed.':'Audio finalized: no exact duplicate tracks removed.';
+    planPath=preparedPath;
     const workdir=text(data.subtitleWorkdir)||path.join(executionDirectory,'subtitles-'+(track?.index??'none'));
     this.state.planPath=planPath;this.state.workdir=workdir;this.state.output=output;this.state.tools=tools;
-    this.task={mode,output,planPath,workdir,tools,track,toolArgs:this.toolArgs(data)};this.state.phase='converting';
+    this.task={mode,output,planPath,workdir,tools,track:finalTrack,toolArgs:this.toolArgs(data)};this.state.phase='converting';
     if(mode==='ocr') {
       await this.step('ocr-subtitles',[...this.subtitleOptions(),...this.ocrOptions(),'--prepare-only'],'Reading subtitle images and recognizing text…');
       const review=JSON.parse(fs.readFileSync(path.join(workdir,'review.json'),'utf8'));

@@ -12,6 +12,8 @@
 <small>Analysis starts automatically. Multi-disc folders let you choose a disc.</small>
 <div id="discChoice" hidden><label for="discSource">Which disc?</label><select id="discSource"></select></div>
 <div id="summary" class="compact" aria-live="polite"></div>
+<small id="audioState" aria-live="polite"></small>
+<div id="audioPanel" hidden><h2 style="margin-top:20px">Audio</h2><div id="audioChoices"></div><label for="defaultAudio">Default audio</label><select id="defaultAudio"></select></div>
 <div id="dilemmas" hidden><p id="warnings" class="warning"></p>
 <div id="playlistChoice" hidden><label for="playlist">Which feature playlist?</label><select id="playlist"></select></div>
 <div id="interlaceChoice" hidden><label for="interlace">Picture type after checking playback</label><select id="interlace"><option value="">Choose picture type…</option><option value="progressive">Progressive</option><option value="interlaced">Interlaced</option></select></div>
@@ -46,13 +48,16 @@
 </main>
 <script>
 const token='__TOKEN__', $=id=>document.getElementById(id);
-const fields=['source','output','title','audio','plan','subtitleWorkdir','ffmpeg','ffprobe','seconv','tesseractDir','subtitleMode','subtitleIndex','playlist','interlace','reviewedSrt'];
+const fields=['source','output','title','audio','plan','subtitleWorkdir','ffmpeg','ffprobe','seconv','tesseractDir','subtitleMode','subtitleIndex','playlist','interlace','reviewedSrt','defaultAudio'];
 const pickerFields=['source','output','plan','ffmpeg','ffprobe','subtitleWorkdir','seconv','tesseractDir','reviewedSrt'];
-let state=null,report=null,picking=false,requesting=false,sourceDirty=false,autoOutput='',timer;
+let state=null,report=null,picking=false,requesting=false,sourceDirty=false,autoOutput='',timer,audioInputs=[];
 async function api(url,body){const response=await fetch(url,{method:body?'POST':'GET',headers:{'x-gui-token':token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const data=await response.json();if(!response.ok)throw Error(data.error);return data;}
-function values(){return Object.fromEntries(fields.map(id=>[id,$(id).value]));}
+function values(){return {...Object.fromEntries(fields.map(id=>[id,$(id).value])),...(audioInputs.length?{selectedAudioIndices:audioInputs.filter(i=>i.checked).map(i=>Number(i.value))}:{})};}
 const language=code=>({eng:'English',ger:'German',deu:'German',fre:'French',fra:'French',ita:'Italian',spa:'Spanish',nor:'Norwegian',nob:'Norwegian',jpn:'Japanese',und:'Unknown language'}[code]||code||'Unknown language');
 function duration(seconds){const total=Math.round(seconds);return [Math.floor(total/3600),Math.floor(total/60)%60,total%60].map((n,i)=>i?String(n).padStart(2,'0'):n).join(':');}
+function audioLabel(t){const codec=t.codec_name?.startsWith('pcm_')?'PCM':t.codec_name==='dts'?(t.profile||'DTS'):({truehd:'Dolby TrueHD',ac3:'Dolby Digital',eac3:'Dolby Digital Plus',aac:'AAC',flac:'FLAC'}[t.codec_name]||t.codec_name||'Audio');const channels=t.channels===2?'stereo':({1:'mono',5:'5.0',6:'5.1',8:'7.1'}[t.channels]||t.channelDescription||'layout pending');return language(t.tags?.language)+' '+codec+' '+channels+(t.tags?.title?' · '+t.tags.title:'')+' · '+(t.metadataOnly?'PID '+t.id:'stream '+t.index);}
+function audioDefaults(){const previous=$('defaultAudio').value;const chosen=audioInputs.filter(i=>i.checked);$('defaultAudio').replaceChildren(...chosen.map(i=>new Option(i.dataset.label,i.value)));if(chosen.some(i=>i.value===previous))$('defaultAudio').value=previous;else if(chosen.some(i=>Number(i.value)===report?.audio?.index))$('defaultAudio').value=String(report.audio.index);controls();}
+function showAudio(p){audioInputs=[];$('audioChoices').replaceChildren();$('audioPanel').hidden=!p;if(!p)return;for(const d of p.audioDecisions||[]){const label=document.createElement('label'),input=document.createElement('input'),caption=document.createElement('span');label.className='check';input.type='checkbox';input.value=String(d.track.index);input.checked=d.retained;input.dataset.label=audioLabel(d.track);caption.textContent=input.dataset.label+(!d.retained?' ('+d.reason+')':'');label.append(input,caption);$('audioChoices').append(label);audioInputs.push(input);input.addEventListener('change',audioDefaults);}audioDefaults();}
 function defaultMode(){
   const toolsReady=!!(($('seconv').value||state?.tools.seconv)&&($('tesseractDir').value||state?.tools.tesseractDir));
   const track=report?.subtitleTracks.find(t=>String(t.index)===$('subtitleIndex').value);
@@ -63,19 +68,22 @@ function defaultMode(){
 function controls(){
   const locked=picking||requesting||!!state?.busy;
   fields.forEach(id=>$(id).disabled=locked);$('discSource').disabled=locked;
+  audioInputs.forEach(i=>i.disabled=locked);
   document.querySelectorAll('[data-picker]').forEach(b=>b.disabled=locked);
   for(const id of ['resolve','reanalyze','recover','openCandidate'])$(id).disabled=locked;
   const mode=$('subtitleMode').value,track=report?.subtitleTracks.find(t=>String(t.index)===$('subtitleIndex').value);
   const toolsReady=!!(($('seconv').value||state?.tools.seconv)&&($('tesseractDir').value||state?.tools.tesseractDir));
   const needsTrack=mode!=='none'&&!track,duplicate=mode==='ocr'&&track&&report.subtitles.some(t=>t.tags?.language===track.tags?.language);
-  const ready=report&&!sourceDirty&&!report.warnings.length&&!needsTrack&&!duplicate&&(mode!=='ocr'||toolsReady)&&$('output').value.trim();
+  const noAudio=report&&audioInputs.length>0&&!audioInputs.some(i=>i.checked);
+  const ready=report&&!sourceDirty&&!report.warnings.length&&!noAudio&&!needsTrack&&!duplicate&&(mode!=='ocr'||toolsReady)&&$('output').value.trim();
   $('convert').disabled=locked||!ready||!!state?.review;
   $('resume').disabled=locked||!$('reviewedSrt').value.trim();
-  $('ready').textContent=sourceDirty?'Analyzing your source is required.':report?.warnings.length?'Resolve the source question above to continue.':needsTrack?'Choose a subtitle track to continue.':duplicate?'This language already has selectable text. Choose None to keep it.':mode==='ocr'&&!toolsReady?'Set SeConv and Tesseract paths in Advanced / Troubleshooting.':ready?'Ready to convert ✓':'';
+  $('ready').textContent=sourceDirty?'Analyzing your source is required.':report?.warnings.length?'Resolve the source question above to continue.':noAudio?'Select at least one audio track.':needsTrack?'Choose a subtitle track to continue.':duplicate?'This language already has selectable text. Choose None to keep it.':mode==='ocr'&&!toolsReady?'Set SeConv and Tesseract paths in Advanced / Troubleshooting.':ready?'Ready to convert ✓':'';
   $('subtitleHint').textContent=mode==='burn'?'Subtitles will become a permanent part of the picture and cannot be switched off.':mode==='ocr'?'Create candidate.srt → proofread externally → supply reviewed.srt → validate, mux, and verify. Video and audio are converted once.':'Existing text subtitles are kept; PGS images are omitted. Selectable PGS text needs SeConv and Tesseract.';
 }
 function showReport(p){
-  report=p;$('summary').textContent='';$('json').textContent=p?JSON.stringify(p,null,2):'';
+  const keepSubtitle=!!(p&&report&&p.source===report.source),previousTrack=$('subtitleIndex').value,previousMode=$('subtitleMode').value,previousPid=report?.subtitleTracks.find(t=>String(t.index)===previousTrack)?.id;
+  report=p;showAudio(p);$('summary').textContent='';$('audioState').textContent='';$('json').textContent=p?JSON.stringify(p,null,2):'';
   $('subtitleIndex').replaceChildren(new Option(p?'Choose a PGS track…':'Analyze a source first',''));
   $('dilemmas').hidden=!p?.warnings.length;
   if(!p)return;
@@ -84,15 +92,18 @@ function showReport(p){
   const valid=tracks.filter(t=>/^[a-z]{3}$/.test(t.tags?.language||'')),english=valid.filter(t=>t.tags.language==='eng');
   if(english.length===1)$('subtitleIndex').value=String(english[0].index);else if(valid.length===1)$('subtitleIndex').value=String(valid[0].index);
   if(!tracks.length)$('subtitleIndex').options[0].textContent='No PGS tracks (existing text is retained)';
-  const audio=[...new Set(p.retainedAudio.map(t=>language(t.tags?.language)+' '+(t.channels===2?'stereo':({6:'5.1',5:'5.0',8:'7.1',1:'mono'}[t.channels]||t.channels+' channels'))))].join(' + ');
+  const audio=[...new Set(p.retainedAudio.map(t=>language(t.tags?.language)+' '+(t.channels===2?'stereo':({6:'5.1',5:'5.0',8:'7.1',1:'mono'}[t.channels]||t.channelDescription||'layout pending'))))].join(' + ');
   const subs=[...new Set(p.subtitleTracks.map(t=>language(t.tags?.language)+' '+(t.codec_name==='hdmv_pgs_subtitle'?'PGS':'text')))].join(' + ')||'No subtitles';
-  $('summary').textContent=p.title+' · '+duration(p.feature.duration)+' · '+p.video.height+(p.interlace.state==='interlaced'?'i':p.interlace.state==='progressive'?'p':' (picture type uncertain)')+' · '+audio+' · '+subs+' · '+p.feature.chapters.length+' chapters';
+  const pictureState=p.interlace.state==='pending'?p.interlace.metadataHint:p.interlace.state;
+  $('summary').textContent=p.title+' · '+duration(p.feature.duration)+' · '+(p.video.height||'Video')+(pictureState==='interlaced'?'i':pictureState==='progressive'?'p':' (picture type pending)')+' · '+(audio||'Audio details pending')+' · '+subs+' · '+p.feature.chapters.length+' chapters';
+  $('audioState').textContent=p.audioPreflight?.status==='pending'?'Audio choices are provisional. Exact duplicates are checked when Convert starts.':state?.audioUpdate||'Audio tracks finalized.';
   $('warnings').textContent=p.warnings.join('\n');
-  $('playlistChoice').hidden=!p.warnings.some(w=>/Competing feature/.test(w));
+  $('playlistChoice').hidden=!p.warnings.some(w=>/Competing feature|repeats clip ranges/.test(w));
   $('interlaceChoice').hidden=!p.warnings.some(w=>/Interlace uncertain/.test(w));
   $('playlist').replaceChildren(new Option('Choose a playlist…',''),...p.candidates.map(c=>new Option(c.playlist+' · '+duration(c.duration)+' · '+c.clips.length+' clips',String(Number(c.playlist)))));
   $('resolve').hidden=$('playlistChoice').hidden&&$('interlaceChoice').hidden;
   defaultMode();
+  if(keepSubtitle){const match=p.subtitleTracks.find(t=>previousPid!==undefined&&Number(t.id)===Number(previousPid));$('subtitleIndex').value=match?String(match.index):previousTrack;$('subtitleMode').value=previousMode;}
 }
 async function poll(){try{
   state=await api('/status');$('status').textContent=state.status;$('progress').hidden=!state.busy;$('error').textContent=state.error||'';$('log').textContent=state.log||'No jobs yet.';
@@ -103,7 +114,7 @@ async function poll(){try{
   if(state.report&&!sourceDirty&&state.output!==autoOutput){if(!$('output').value||$('output').value===autoOutput)$('output').value=state.output;autoOutput=state.output;}
   $('review').hidden=!state.review;if(state.review)$('reviewInfo').textContent=state.review.reviewNeeded.length+' flagged item(s)\nCandidate: '+state.review.candidate+'\nReview report: '+state.review.report;
   $('recover').hidden=state.phase!=='error'||!state.recoverable;
-  $('technical').textContent='Plan: '+state.planPath+'\nWork/cache: '+state.workdir+'\nDetected SeConv: '+(state.tools.seconv||'not found')+'\nDetected Tesseract: '+(state.tools.tesseractDir||'not found');
+  $('technical').textContent='Plan: '+state.planPath+'\nWork/cache: '+state.workdir+'\nDetected SeConv: '+(state.tools.seconv||'not found')+'\nDetected Tesseract: '+(state.tools.tesseractDir||'not found')+'\n'+(state.report?.timings||[]).map(t=>t.step+': '+t.ms+' ms').join('\n');
   controls();
 }catch(error){$('status').textContent='Disconnected — check the GUI terminal.';$('convert').disabled=true;}}
 async function run(action){

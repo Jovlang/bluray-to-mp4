@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {ocrSubtitles,burnPgs} from './pgs-ocr.mjs';
+import {fastScan,profiler} from './fast-scan.mjs';
 const args=process.argv.slice(2), mode=args.shift();
 function opt(k,d){const i=args.indexOf('--'+k);return i<0?d:args[i+1];}
 function run(bin,a,inherit=false){const r=spawnSync(bin,a,{encoding:'utf8',stdio:inherit?'inherit':'pipe',maxBuffer:64*1024*1024});if(r.error)throw r.error;if(r.status!==0)throw Error(`${bin} failed (${r.status}): ${r.stderr||''}`);return r.stdout;}
@@ -24,8 +25,8 @@ function moveNoReplace(source,destination){
 function mpls(file){const b=fs.readFileSync(file);if(b.toString('ascii',0,4)!=='MPLS')throw Error('Invalid MPLS');const p=b.readUInt32BE(8),m=b.readUInt32BE(12),n=b.readUInt16BE(p+6);let at=p+10,items=[];for(let i=0;i<n;i++){const len=b.readUInt16BE(at),s=at+2;const clip=b.toString('ascii',s,s+5),start=b.readUInt32BE(s+12)/45000,end=b.readUInt32BE(s+16)/45000;items.push({clip,start,end});at=s+len;}let chapters=[],base=0;const bases=items.map(i=>{const v=base;base+=i.end-i.start;return v;});if(m && m+6<=b.length){const count=b.readUInt16BE(m+4);for(let i=0;i<count;i++){const s=m+6+i*14,ref=b.readUInt16BE(s+2);if(b[s+1]===1&&items[ref]){const t=bases[ref]+b.readUInt32BE(s+4)/45000-items[ref].start;if(t>=0&&t<base)chapters.push(t);}}}return {playlist:path.basename(file,'.mpls'),duration:base,items,chapters:[...new Set([0,...chapters])].sort((a,b)=>a-b),signature:JSON.stringify(items),hash:hash(b)};}
 function fingerprint(root,pl){return hash(JSON.stringify({mpls:hash(fs.readFileSync(path.join(root,'BDMV','PLAYLIST',pl.playlist+'.mpls'))),clips:pl.items.map(i=>{const f=path.join(root,'BDMV','STREAM',i.clip+'.m2ts'),s=fs.statSync(f);return [f,s.size,s.mtimeMs];})}));}
 function input(p){return ['-playlist',String(Number(p.feature.playlist)),'-i','bluray:'+p.source];}
-function detect(p,v){const samples=[];for(const frac of [.12,.48,.82]){const r=spawnSync(ff,['-hide_banner','-ss',String(p.feature.duration*frac),...input(p),'-map',`0:${v.index}`,'-an','-sn','-vf','idet','-frames:v','300','-f','null','-'],{encoding:'utf8',maxBuffer:8*1024*1024});if(r.status!==0)throw Error(r.stderr);const all=[...r.stderr.matchAll(/Multi frame detection: TFF:\s*(\d+) BFF:\s*(\d+) Progressive:\s*(\d+) Undetermined:\s*(\d+)/g)];if(!all.length)throw Error('idet returned no result');const x=all.at(-1).slice(1).map(Number);samples.push({tff:x[0],bff:x[1],progressive:x[2],undetermined:x[3]});}const t=samples.reduce((a,s)=>a+s.tff+s.bff,0),g=samples.reduce((a,s)=>a+s.progressive,0),ratio=t/Math.max(1,t+g);return {samples,ratio,state:ratio>.8?'interlaced':ratio<.05&&g>300?'progressive':'uncertain',fieldOrder:v.field_order};}
-function audioScore(s){const label=JSON.stringify(s.tags||{});if(/commentary|descriptive|description|visually impaired/i.test(label)||s.disposition?.comment||s.disposition?.visual_impaired)return -1e6;return Math.min(s.channels||0,6)*100+(/truehd|dts|pcm|flac/.test(s.codec_name)?40:0)+(s.disposition?.default?10:0);}
+function detect(p,v,profile=profiler()){const samples=[];for(const frac of [.12,.48,.82]){const r=profile.measure('idet sample '+frac,()=>spawnSync(ff,['-hide_banner','-ss',String(p.feature.duration*frac),...input(p),'-map',`0:${v.index}`,'-an','-sn','-vf','idet','-frames:v','300','-f','null','-'],{encoding:'utf8',maxBuffer:8*1024*1024}));if(r.status!==0)throw Error(r.stderr);const all=[...r.stderr.matchAll(/Multi frame detection: TFF:\s*(\d+) BFF:\s*(\d+) Progressive:\s*(\d+) Undetermined:\s*(\d+)/g)];if(!all.length)throw Error('idet returned no result');const x=all.at(-1).slice(1).map(Number);samples.push({tff:x[0],bff:x[1],progressive:x[2],undetermined:x[3]});}const t=samples.reduce((a,s)=>a+s.tff+s.bff,0),g=samples.reduce((a,s)=>a+s.progressive,0),ratio=t/Math.max(1,t+g);return {samples,ratio,state:ratio>.8?'interlaced':ratio<.05&&g>300?'progressive':'uncertain',fieldOrder:v.field_order};}
+function audioScore(s){const label=JSON.stringify(s.tags||{});if(/commentary|descriptive|description|visually impaired/i.test(label)||s.disposition?.comment||s.disposition?.visual_impaired)return -1e6;return Math.min(s.channels||(s.channelDescription?.startsWith('multichannel')?6:0),6)*100+(/truehd|dts|pcm|flac/.test(s.codec_name)?40:0)+(s.disposition?.default?10:0);}
 
 const textCodecs = new Set(['subrip','srt','ass','ssa','webvtt','mov_text','text','ttml','microdvd','mpl2','jacosub','sami','realtext','subviewer','subviewer1','vplayer','pjs','stl','eia_608']);
 const titleOf = s => s.tags?.title || s.tags?.handler_name || '';
@@ -64,9 +65,11 @@ function audioHashes(p, tracks) {
 }
 function selectTracks(p,q,chosen,hashes) {
  p.audioTracks=q.streams.filter(s=>s.codec_type==='audio');
+ const selected=p.selectedAudioIndices;
+ if(selected!==undefined&&(!Array.isArray(selected)||!selected.length||new Set(selected).size!==selected.length||selected.some(i=>!Number.isInteger(i)||!p.audioTracks.some(t=>t.index===i))))throw Error('Select at least one valid audio track');
  const retained=[],seen=new Map();
  p.audioDecisions=p.audioTracks.map(track=>{
-  if(audioScore(track)<0)return {track,retained:false,reason:'Commentary or audio description'};
+  if(selected?!selected.includes(track.index):audioScore(track)<0)return {track,retained:false,reason:selected?'Not selected':'Commentary or audio description'};
   // Equal labels alone never prove equivalence. Only identical full payloads,
   // codec, channel layout and language are deduplicated. Keep the first copy.
   const digest=hashes.get(track.index);
@@ -84,6 +87,59 @@ function selectTracks(p,q,chosen,hashes) {
  p.subtitleTracks=q.streams.filter(s=>s.codec_type==='subtitle');
  p.subtitleDecisions=p.subtitleTracks.map(track=>({track,retained:textCodecs.has(track.codec_name),reason:textCodecs.has(track.codec_name)?'Text subtitle -> mov_text':'Image/PGS or unsupported non-text subtitle; no OCR/burn-in'}));
  p.subtitles=p.subtitleDecisions.filter(d=>d.retained).map(d=>d.track);
+}
+function expectedAudio(p) {
+ return p.retainedAudio.map(t=>({sourceIndex:t.index,language:languageOf(t),title:titleOf(t),codec:'AAC-LC',channels:Math.min(t.channels,6),bitrate:t.channels>2?'512k':'256k',default:t.index===p.audio.index}));
+}
+function inspectTracks(p,q,chosen) {
+ p.requestedDefaultAudio=chosen;
+ selectTracks(p,q,chosen,new Map());
+ p.audioPreflight={status:'pending'};
+}
+function prepareAudio(p,{hashTracks=audioHashes,checkSource=fingerprint}={}) {
+ if(p.version!==2)throw Error('Audio preflight requires a version-2 inspection plan');
+ if(p.preflight?.status==='pending')throw Error('Run media preflight before audio duplicate detection');
+ if(p.warnings.length)throw Error(p.warnings.join('\n'));
+ if(checkSource(p.source,p.feature)!==p.fingerprint)throw Error('Source changed; inspect again');
+ const prepared=structuredClone(p);
+ selectTracks(prepared,prepared.sourceProbe,p.requestedDefaultAudio??p.audio.index,new Map());
+ const candidates=prepared.retainedAudio;
+ const profile=profiler();
+ const hashes=candidates.length>1?profile.measure('full selected-audio SHA-256 read',()=>hashTracks(p,candidates)):new Map();
+ if(candidates.length>1&&(hashes.size!==candidates.length||candidates.some(t=>!hashes.has(t.index))))throw Error('Could not fingerprint all audio payloads');
+ if(checkSource(p.source,p.feature)!==p.fingerprint)throw Error('Source changed during audio preflight; inspect again');
+ selectTracks(prepared,prepared.sourceProbe,p.requestedDefaultAudio??p.audio.index,hashes);
+ prepared.expected.audio=expectedAudio(prepared);
+ prepared.audioPreflight={status:'complete',algorithm:'SHA-256',payloads:Object.fromEntries(hashes),...(candidates.length===1?{note:'Only one selected audio track; no duplicates possible'}:{})};
+ prepared.timings=[...(p.timings||[]),...profile.timings];
+ return prepared;
+}
+function prepareMedia(p,{probeSource=probe,sampleVideo=detect,checkSource=fingerprint,recoverLanguages=playlistLanguages}={}) {
+ if(p.preflight?.status!=='pending')return structuredClone(p);
+ if(p.warnings.length)throw Error(p.warnings.join('\n'));
+ const profile=profiler(),prepared=structuredClone(p);
+ const current=profile.measure('source fingerprint before preflight',()=>checkSource(p.source,p.feature));
+ if(hash(fs.readFileSync(path.join(p.source,'BDMV','PLAYLIST',p.feature.playlist+'.mpls')))!==p.feature.hash)throw Error('Playlist changed; scan again');
+ const q=profile.measure('ffprobe selected playlist',()=>probeSource(input(p)));
+ profile.measure('recover playlist languages/PIDs',()=>recoverLanguages(prepared,q));
+ const mapIndex=(index,type)=>{
+  const old=p.sourceProbe.streams.find(t=>t.index===Number(index)&&t.codec_type===type);
+  const matches=old?q.streams.filter(t=>t.codec_type===type&&Number(t.id)===Number(old.id)):[];
+  if(matches.length!==1)throw Error('Selected '+type+' track could not be matched by PID; scan again');return matches[0].index;
+ };
+ if(p.selectedAudioIndices)prepared.selectedAudioIndices=p.selectedAudioIndices.map(index=>mapIndex(index,'audio'));
+ prepared.requestedDefaultAudio=p.requestedDefaultAudio===undefined?undefined:mapIndex(p.requestedDefaultAudio,'audio');
+ prepared.sourceProbe=q;prepared.video=q.streams.filter(s=>s.codec_type==='video'&&!s.disposition?.attached_pic).sort((a,b)=>b.width*b.height-a.width*a.height)[0];
+ if(!prepared.video)throw Error('No video');
+ inspectTracks(prepared,q,prepared.requestedDefaultAudio);
+ if(p.requestedInterlace){prepared.interlace={state:p.requestedInterlace,manual:true};}
+ else prepared.interlace=profile.measure('idet samples total',()=>sampleVideo(prepared,prepared.video,profile));
+ if(prepared.interlace.state==='uncertain')prepared.warnings.push('Interlace uncertain: review samples/source and rerun with --interlace progressive|interlaced.');
+ if(/smpte2084|arib-std-b67/.test(prepared.video.color_transfer||'')||prepared.video.color_space==='bt2020nc')prepared.warnings.push('HDR/wide gamut source requires a separately reviewed tone mapping workflow.');
+ prepared.filters=[...(prepared.interlace.state==='interlaced'?['bwdif=mode=send_frame:parity=auto:deint=all']:[]),"scale=w='min(iw,1920)':h='min(ih,1080)':force_original_aspect_ratio=decrease:force_divisible_by=2",'format=yuv420p'];
+ prepared.expected={video:'libx264 CRF 20 medium yuv420p; original frame rate; maximum 1920x1080',audio:expectedAudio(prepared),subtitles:prepared.subtitles.map(s=>s.index),chapters:prepared.feature.chapters.length,filters:prepared.filters};
+ if(profile.measure('source fingerprint after preflight',()=>checkSource(p.source,p.feature))!==current)throw Error('Source changed during media preflight; scan again');
+ prepared.fingerprint=current;prepared.preflight={status:'complete'};prepared.scanStage='preflight';prepared.timings=[...(p.timings||[]),...profile.timings];return prepared;
 }
 function trackOptions(p) {
  const a=[];
@@ -196,6 +252,8 @@ function buildEncodeCommand(p,{metadata,output,burn,resilient=false,sourceInput=
 
 function encodeReviewed({p,planFile,output,burn,prepareOnly=false,finalize=false,resilient=false,sourceInput}) {
  if(p.version!==2)throw Error('This converter requires a new version-2 inspection plan');
+ if(p.preflight?.status==='pending')throw Error('Fast scan is metadata only. Complete media preflight before encoding.');
+ if(p.audioPreflight && p.audioPreflight.status!=='complete')throw Error('Audio decisions are provisional. Run prepare-audio --plan INPUT --prepared-plan NEW_PLAN before encoding or finalizing.');
  if(p.warnings.length)throw Error(p.warnings.join('\n'));
  if(fingerprint(p.source,p.feature)!==p.fingerprint)throw Error('Source changed; inspect again');
  output=path.resolve(output);
@@ -235,12 +293,42 @@ function encodeReviewed({p,planFile,output,burn,prepareOnly=false,finalize=false
 }
 
 function main(){
+ // CLI conversion also prepares provisional plans, preserving the inspection file.
+ if(['encode','finalize','burn-pgs','ocr-subtitles'].includes(mode)){
+  const originalPlan=path.resolve(opt('plan','apple-mp4-plan.json'));
+  const contents=fs.readFileSync(originalPlan),p=JSON.parse(contents);
+  if(p.audioPreflight?.status==='pending'){
+   const preparedPath=originalPlan+'.audio-ready.json',inspectionPlanHash=hash(contents);
+   if(fs.existsSync(preparedPath)){
+    const existing=JSON.parse(fs.readFileSync(preparedPath));
+    if(existing.audioPreflight?.status!=='complete'||existing.audioPreflight.inspectionPlanHash!==inspectionPlanHash)throw Error('Existing prepared plan does not match inspection; preserved. Use prepare-audio with a new --prepared-plan path.');
+   }else{
+    console.error('Preparing conversion — checking audio tracks for exact duplicates');
+    const prepared=prepareAudio(prepareMedia(p));prepared.audioPreflight.inspectionPlanHash=inspectionPlanHash;
+    fs.writeFileSync(preparedPath,JSON.stringify(prepared,null,2),{flag:'wx'});
+   }
+   const at=args.indexOf('--plan');if(at<0)args.push('--plan',preparedPath);else args[at+1]=preparedPath;
+  }
+ }
+ if(mode==='prepare-audio'||mode==='prepare-media'){
+  const destination=opt('prepared-plan');if(!destination)throw Error('--prepared-plan NEW_PATH is required');
+  if(fs.existsSync(destination))throw Error('Prepared plan already exists; choose a new filename');
+  const p=JSON.parse(fs.readFileSync(path.resolve(opt('plan','apple-mp4-plan.json'))));
+  const prepared=mode==='prepare-media'?prepareMedia(p):prepareAudio(prepareMedia(p));
+  fs.writeFileSync(path.resolve(destination),JSON.stringify(prepared,null,2),{flag:'wx'});
+  console.log(JSON.stringify({plan:path.resolve(destination),audioTracks:prepared.audioDecisions,selectedDefaultAudio:prepared.audio,expected:prepared.expected,audioPreflight:prepared.audioPreflight},null,2));return;
+ }
  if(mode==='burn-pgs'){burnPgs({args,opt,run,probe,ff,fp,hash,moveNoReplace,mpls,input,fingerprint,validate,restoreSubtitleDefaults,encodeReviewed});return;}
  if(mode==='ocr-subtitles'){ocrSubtitles({args,opt,run,probe,ff,fp,hash,moveNoReplace,mpls,input,fingerprint,validate,restoreSubtitleDefaults});return;}
 
  if(mode==='inspect'){
-  let source=path.resolve(opt('source',''));if(path.basename(source).toUpperCase()==='BDMV')source=path.dirname(source);
-  if(!opt('source'))throw Error('--source is required');const dir=path.join(source,'BDMV','PLAYLIST');let candidates=fs.readdirSync(dir).filter(f=>/\.mpls$/i.test(f)).map(f=>mpls(path.join(dir,f))).filter(p=>p.duration>60).sort((a,b)=>b.duration-a.duration);const unique=[...new Map(candidates.map(p=>[p.signature,p])).values()].sort((a,b)=>b.duration-a.duration);if(!unique.length)throw Error('No feature playlists');const selected=opt('playlist');const feature=selected?candidates.find(p=>Number(p.playlist)===Number(selected)):unique[0];if(!feature)throw Error('Playlist not found');const p={version:2,source,title:opt('title',path.basename(source)),output:path.resolve(opt('output',path.join(source,path.basename(source)+'.mp4'))),feature,candidates:unique.map(({playlist,duration,items})=>({playlist,duration,clips:items.map(i=>i.clip)})),warnings:[]};p.fingerprint=fingerprint(source,feature);const q=probe(input(p));playlistLanguages(p,q);p.sourceProbe=q;p.video=q.streams.filter(s=>s.codec_type==='video'&&!s.disposition?.attached_pic).sort((a,b)=>b.width*b.height-a.width*a.height)[0];if(!p.video)throw Error('No video');const audioCandidates=q.streams.filter(t=>t.codec_type==='audio'&&audioScore(t)>=0);selectTracks(p,q,opt('audio'),audioHashes(p,audioCandidates));p.interlace=detect(p,p.video);const force=opt('interlace');if(force){if(!['progressive','interlaced'].includes(force))throw Error('Invalid --interlace');p.interlace.state=force;p.interlace.manual=true;}if(new Set(feature.items.map(i=>JSON.stringify(i))).size<feature.items.length)p.warnings.push('Selected playlist repeats clip ranges; review for loops/extras before encoding.');if(!selected&&unique[1]?.duration>feature.duration*.9)p.warnings.push('Competing feature playlists: inspect candidates and rerun with --playlist NUMBER.');if(p.interlace.state==='uncertain')p.warnings.push('Interlace uncertain: review samples/source and rerun with --interlace progressive|interlaced.');if(/smpte2084|arib-std-b67/.test(p.video.color_transfer||'')||p.video.color_space==='bt2020nc')p.warnings.push('HDR/wide gamut source requires a separately reviewed tone mapping workflow.');p.filters=[...(p.interlace.state==='interlaced'?['bwdif=mode=send_frame:parity=auto:deint=all']:[]),"scale=w='min(iw,1920)':h='min(ih,1080)':force_original_aspect_ratio=decrease:force_divisible_by=2",'format=yuv420p'];p.expected={video:'libx264 CRF 20 medium yuv420p; original frame rate; maximum 1920x1080',audio:p.retainedAudio.map(t=>({sourceIndex:t.index,language:languageOf(t),title:titleOf(t),codec:'AAC-LC',channels:Math.min(t.channels,6),bitrate:t.channels>2?'512k':'256k',default:t.index===p.audio.index})),subtitles:p.subtitles.map(s=>s.index),chapters:feature.chapters.length,filters:p.filters};const plan=path.resolve(opt('plan','apple-mp4-plan.json'));fs.writeFileSync(plan,JSON.stringify(p,null,2),{flag:'wx'});console.log(JSON.stringify({plan,title:p.title,feature:p.feature,candidates:p.candidates,video:p.video,audioTracks:p.audioDecisions,subtitleTracks:p.subtitleDecisions,selectedDefaultAudio:p.audio,interlace:p.interlace,expected:p.expected,warnings:p.warnings},null,2));return;
+  if(!opt('source'))throw Error('--source is required');
+  let source=path.resolve(opt('source'));if(path.basename(source).toUpperCase()==='BDMV')source=path.dirname(source);
+  const force=opt('interlace');if(force&&!['progressive','interlaced'].includes(force))throw Error('Invalid --interlace');
+  const p=fastScan({source,output:path.resolve(opt('output',path.join(source,path.basename(source)+'.mp4'))),title:opt('title'),playlist:opt('playlist'),audio:opt('audio'),mpls,inspectTracks,expectedAudio});
+  p.requestedInterlace=force;
+  const plan=path.resolve(opt('plan','apple-mp4-plan.json'));fs.writeFileSync(plan,JSON.stringify(p,null,2),{flag:'wx'});
+  console.log(JSON.stringify({plan,...p},null,2));return;
  }
  if(mode==='encode'||mode==='finalize'){
   const planFile=path.resolve(opt('plan','apple-mp4-plan.json'));
@@ -249,7 +337,7 @@ function main(){
  }
  console.log('Inspect: node apple-mp4.mjs inspect --source "D:\\Opera" --output "D:\\Converted\\Opera.mp4" --plan "Opera.plan.json"\nEncode after review: node apple-mp4.mjs encode --plan "Opera.plan.json"\nRecover a completed partial (reverifies fully): node apple-mp4.mjs finalize --plan \"Opera.plan.json\"\nOpt-in PGS OCR/remux: node apple-mp4.mjs ocr-subtitles --plan Opera.plan.json --language eng --seconv PATH --tesseract-dir DIR --prepare-only\nAfter text review: repeat with --reviewed-srt reviewed.srt --output Opera-English.mp4\nHardcoded PGS option: node apple-mp4.mjs burn-pgs --plan Opera.plan.json --language eng --output Opera-burned.mp4 --prepare-only\nInspection options: --playlist NUMBER --audio STREAM_INDEX --interlace progressive|interlaced --title TITLE\nTool overrides: --ffmpeg PATH --ffprobe PATH');
 }
-export {encodeReviewed,buildEncodeCommand,chapterMetadata,fingerprint,moveNoReplace, mpls, playlistLanguages, audioScore, selectTracks, trackOptions, verifyTracks, validate, probe, run, restoreSubtitleDefaults};
+export {encodeReviewed,buildEncodeCommand,chapterMetadata,fingerprint,moveNoReplace, mpls, playlistLanguages, audioScore, selectTracks, inspectTracks, prepareMedia, prepareAudio, expectedAudio, trackOptions, verifyTracks, validate, probe, run, restoreSubtitleDefaults};
 if(process.argv[1] && import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
  try{main();}catch(e){console.error(e.message);process.exitCode=1;}
 }
