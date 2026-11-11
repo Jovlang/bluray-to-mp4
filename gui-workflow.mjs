@@ -5,6 +5,7 @@ import {randomUUID} from 'node:crypto';
 import {findDiscSources} from './gui-source.mjs';
 import {validateReviewedSrt,supTimes} from './pgs-ocr.mjs';
 import {selectTracks,expectedAudio} from './apple-mp4.mjs';
+import {applyVideoSettings} from './video-settings.mjs';
 const text=v=>typeof v==='string'?v.trim():'';
 export function suggestedOutput(source,title) {
   const name=(title||path.basename(source)).replace(/[<>:"/\\|?*\x00-\x1f]/g,' ').replace(/[. ]+$/,'').trim()||'Movie';
@@ -86,6 +87,7 @@ export class GuiWorkflow {
     if(fs.readFileSync(this.inspectionPath,'utf8')!==this.contents)throw Error('Inspection plan changed. Analyze the source again.');
     const plan=JSON.parse(this.contents);
     if(plan.warnings.length)throw Error(plan.warnings.join('\n'));
+    applyVideoSettings(plan,text(data.resolution)||'1080p');
     if(data.selectedAudioIndices!==undefined){
       if(!Array.isArray(data.selectedAudioIndices))throw Error('Select at least one valid audio track');
       plan.selectedAudioIndices=data.selectedAudioIndices;

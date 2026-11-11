@@ -44,4 +44,5 @@ assert.equal(evaluate('values().selectedAudioIndices.join()'),'1');
 evaluate("state.busy=true; controls();");assert.equal(elements.get('convert').disabled,true);
 evaluate("state.busy=false; $('source').value='other source'; sourceChanged();");assert.equal(elements.get('convert').disabled,true);assert(pending.length);
 assert(!html.includes('I reviewed the playlist'));
+assert(html.includes('Output resolution'));evaluate("$('resolution').value='720p';");assert.equal(evaluate('values().resolution'),'720p');
 console.log('PASS: compact summary, automatic source analysis, automatic OCR default, ambiguity prompts, warning/busy/source-change gates, and ready state without review checkbox.');

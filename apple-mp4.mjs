@@ -7,6 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {ocrSubtitles,burnPgs} from './pgs-ocr.mjs';
 import {fastScan,profiler} from './fast-scan.mjs';
+import {applyVideoSettings,videoBounds} from './video-settings.mjs';
 const args=process.argv.slice(2), mode=args.shift();
 function opt(k,d){const i=args.indexOf('--'+k);return i<0?d:args[i+1];}
 function run(bin,a,inherit=false){const r=spawnSync(bin,a,{encoding:'utf8',stdio:inherit?'inherit':'pipe',maxBuffer:64*1024*1024});if(r.error)throw r.error;if(r.status!==0)throw Error(`${bin} failed (${r.status}): ${r.stderr||''}`);return r.stdout;}
@@ -136,8 +137,8 @@ function prepareMedia(p,{probeSource=probe,sampleVideo=detect,checkSource=finger
  else prepared.interlace=profile.measure('idet samples total',()=>sampleVideo(prepared,prepared.video,profile));
  if(prepared.interlace.state==='uncertain')prepared.warnings.push('Interlace uncertain: review samples/source and rerun with --interlace progressive|interlaced.');
  if(/smpte2084|arib-std-b67/.test(prepared.video.color_transfer||'')||prepared.video.color_space==='bt2020nc')prepared.warnings.push('HDR/wide gamut source requires a separately reviewed tone mapping workflow.');
- prepared.filters=[...(prepared.interlace.state==='interlaced'?['bwdif=mode=send_frame:parity=auto:deint=all']:[]),"scale=w='min(iw,1920)':h='min(ih,1080)':force_original_aspect_ratio=decrease:force_divisible_by=2",'format=yuv420p'];
- prepared.expected={video:'libx264 CRF 20 medium yuv420p; original frame rate; maximum 1920x1080',audio:expectedAudio(prepared),subtitles:prepared.subtitles.map(s=>s.index),chapters:prepared.feature.chapters.length,filters:prepared.filters};
+ prepared.expected={audio:expectedAudio(prepared),subtitles:prepared.subtitles.map(s=>s.index),chapters:prepared.feature.chapters.length};
+ applyVideoSettings(prepared);
  if(profile.measure('source fingerprint after preflight',()=>checkSource(p.source,p.feature))!==current)throw Error('Source changed during media preflight; scan again');
  prepared.fingerprint=current;prepared.preflight={status:'complete'};prepared.scanStage='preflight';prepared.timings=[...(p.timings||[]),...profile.timings];return prepared;
 }
@@ -221,7 +222,7 @@ function verifyTracks(q,p) {
  sub.forEach((out,i)=>{if(out.codec_name!=='mov_text')throw Error('Invalid MP4 text subtitle codec');metadata(p.subtitles[i],out,!!p.subtitles[i].disposition?.default);});
 }
 
-function validate(file,p,decode=true){const q=probe(['-i',file]),v=q.streams.filter(s=>s.codec_type==='video'),a=q.streams.filter(s=>s.codec_type==='audio');if(v.length!==1||v[0].codec_name!=='h264'||v[0].pix_fmt!=='yuv420p'||v[0].height>1080||v[0].width>1920||!a.length||a.some(s=>s.codec_name!=='aac'||s.profile!=='LC'))throw Error('Output codec/layout validation failed');if(Math.abs(Number(q.format.duration)-p.feature.duration)>Math.max(3,p.feature.duration*.001))throw Error('Output duration mismatch');const rate=s=>{const [n,d]=s.split('/').map(Number);return n/d;};if(Math.abs(rate(v[0].avg_frame_rate)-rate(p.video.avg_frame_rate))>.02)throw Error('Frame rate mismatch');if(p.version===2)verifyTracks(q,p);if(decode && p.version===2 && p.subtitles.length)run(ff,['-v','error','-xerror','-i',file,'-map','0:s','-c:s','srt','-f','null','-'],true);if(decode)run(ff,['-v','error','-xerror','-i',file,'-map','0:v:0','-map','0:a','-fps_mode','passthrough','-enc_time_base:v','demux','-f','null','-'],true);return q;}
+function validate(file,p,decode=true){const bounds=videoBounds(p);const q=probe(['-i',file]),v=q.streams.filter(s=>s.codec_type==='video'),a=q.streams.filter(s=>s.codec_type==='audio');if(v.length!==1||v[0].codec_name!=='h264'||v[0].pix_fmt!=='yuv420p'||v[0].height>bounds.height||v[0].width>bounds.width||!a.length||a.some(s=>s.codec_name!=='aac'||s.profile!=='LC'))throw Error('Output codec/layout validation failed');if(Math.abs(Number(q.format.duration)-p.feature.duration)>Math.max(3,p.feature.duration*.001))throw Error('Output duration mismatch');const rate=s=>{const [n,d]=s.split('/').map(Number);return n/d;};if(Math.abs(rate(v[0].avg_frame_rate)-rate(p.video.avg_frame_rate))>.02)throw Error('Frame rate mismatch');if(p.version===2)verifyTracks(q,p);if(decode && p.version===2 && p.subtitles.length)run(ff,['-v','error','-xerror','-i',file,'-map','0:s','-c:s','srt','-f','null','-'],true);if(decode)run(ff,['-v','error','-xerror','-i',file,'-map','0:v:0','-map','0:a','-fps_mode','passthrough','-enc_time_base:v','demux','-f','null','-'],true);return q;}
 function chapterMetadata(p) {
  const escape=s=>s.replace(/[\\=;#\n]/g,c=>'\\'+c);
  let text=';FFMETADATA1\ntitle='+escape(p.title)+'\n';
@@ -327,6 +328,7 @@ function main(){
   const force=opt('interlace');if(force&&!['progressive','interlaced'].includes(force))throw Error('Invalid --interlace');
   const p=fastScan({source,output:path.resolve(opt('output',path.join(source,path.basename(source)+'.mp4'))),title:opt('title'),playlist:opt('playlist'),audio:opt('audio'),mpls,inspectTracks,expectedAudio});
   p.requestedInterlace=force;
+  applyVideoSettings(p,opt('resolution','1080p'));
   const plan=path.resolve(opt('plan','apple-mp4-plan.json'));fs.writeFileSync(plan,JSON.stringify(p,null,2),{flag:'wx'});
   console.log(JSON.stringify({plan,...p},null,2));return;
  }

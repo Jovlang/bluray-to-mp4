@@ -10,6 +10,6 @@
   "scripts": {
     "gui": "node gui.mjs",
     "test:gui": "node tests/gui-workflow.mjs && node tests/gui-client.mjs && node tests/gui.mjs",
-    "test": "node tests/regression.mjs && node tests/fast-scan.mjs && node tests/audio-preflight.mjs && node tests/pgs-ocr.mjs && node tests/burn-pgs.mjs"
+    "test": "node tests/regression.mjs && node tests/resolution.mjs && node tests/fast-scan.mjs && node tests/audio-preflight.mjs && node tests/pgs-ocr.mjs && node tests/burn-pgs.mjs"
   }
 }

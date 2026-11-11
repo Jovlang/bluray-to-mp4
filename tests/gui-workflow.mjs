@@ -55,9 +55,10 @@ try {
   }
   {
     const {app,calls}=controller();await inspect(app);
-    await app.start('convert',{output:path.join(scratch,'selected.mp4'),subtitleMode:'none',selectedAudioIndices:[2],defaultAudio:'2'});
+    await app.start('convert',{output:path.join(scratch,'selected.mp4'),subtitleMode:'none',selectedAudioIndices:[2],defaultAudio:'2',resolution:'720p'});
     assert.equal(app.state.phase,'complete');assert.deepEqual(app.state.report.retainedAudio.map(t=>t.index),[2]);assert.equal(app.state.report.audio.index,2);
     assert.equal(calls[2].mode,'prepare-audio');
+    const executionPlan=JSON.parse(fs.readFileSync(app.state.planPath));assert.equal(executionPlan.targetResolution,'720p');assert(executionPlan.filters.some(f=>f.includes('1280')));
   }
   {
     const {app,calls}=controller();await inspect(app);

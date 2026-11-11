@@ -27,6 +27,7 @@
 </section>
 <section>
 <h2>Save as</h2><label for="output">MP4 file</label><input id="output" placeholder="Suggested automatically after analysis">
+<label for="resolution">Output resolution</label><select id="resolution"><option value="1080p">1080p — Full HD (1920 × 1080)</option><option value="720p">720p — HD (1280 × 720)</option><option value="480p">480p — SD (854 × 480)</option></select><small>Maximum size; smaller sources are not upscaled. Aspect ratio is preserved. A 2160p SDR source can be converted to 1080p. HDR sources still require a separate tone-mapping workflow.</small>
 <button id="convert" disabled>Convert</button>
 <small id="ready"></small>
 </section>
@@ -48,7 +49,7 @@
 </main>
 <script>
 const token='__TOKEN__', $=id=>document.getElementById(id);
-const fields=['source','output','title','audio','plan','subtitleWorkdir','ffmpeg','ffprobe','seconv','tesseractDir','subtitleMode','subtitleIndex','playlist','interlace','reviewedSrt','defaultAudio'];
+const fields=['source','output','title','audio','plan','subtitleWorkdir','ffmpeg','ffprobe','seconv','tesseractDir','subtitleMode','subtitleIndex','playlist','interlace','reviewedSrt','defaultAudio','resolution'];
 const pickerFields=['source','output','plan','ffmpeg','ffprobe','subtitleWorkdir','seconv','tesseractDir','reviewedSrt'];
 let state=null,report=null,picking=false,requesting=false,sourceDirty=false,autoOutput='',timer,audioInputs=[];
 async function api(url,body){const response=await fetch(url,{method:body?'POST':'GET',headers:{'x-gui-token':token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const data=await response.json();if(!response.ok)throw Error(data.error);return data;}
@@ -131,7 +132,7 @@ for(const id of pickerFields){
 $('source').addEventListener('input',sourceChanged);
 $('discSource').onchange=()=>{if($('discSource').value){$('source').value=$('discSource').value;sourceDirty=true;$('plan').value='';run('inspect');}};
 for(const id of ['title','audio','ffmpeg','ffprobe','plan'])$(id).addEventListener('input',()=>{sourceDirty=true;controls();});
-for(const id of ['output','subtitleMode','subtitleIndex','subtitleWorkdir','reviewedSrt'])$(id).addEventListener('input',controls);
+for(const id of ['output','resolution','subtitleMode','subtitleIndex','subtitleWorkdir','reviewedSrt'])$(id).addEventListener('input',controls);
 for(const id of ['seconv','tesseractDir'])$(id).addEventListener('input',()=>{defaultMode();controls();});
 $('convert').onclick=()=>run('convert');$('resume').onclick=()=>run('resume');$('recover').onclick=()=>run('recover');$('resolve').onclick=()=>run('inspect');$('reanalyze').onclick=()=>run('inspect');
 $('openCandidate').onclick=async()=>{try{await api('/open-candidate',{});}catch(error){$('error').textContent=error.message;}};
